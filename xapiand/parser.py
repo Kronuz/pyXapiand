@@ -65,11 +65,12 @@ def index_parser(document):
     except Exception as e:
         return ">> ERR: [400] %s" % e
 
-    document_id = document.get('id')
+    document = document.copy()
+    document_id = document.pop('id', None)
     if not document_id:
         return ">> ERR: [400] Document must have an 'id'"
 
-    document_data = document.get('data')
+    document_data = document.pop('data', None)
     if not document_data:
         return ">> ERR: [400] You must provide 'data' to index"
     try:
@@ -77,9 +78,9 @@ def index_parser(document):
     except:
         return ">> ERR: [400] 'data' must be a valid json serializable object"
 
-    default_language = document.get('language')
-    default_spelling = bool(document.get('spelling', False))
-    default_positions = bool(document.get('positions', False))
+    default_language = document.pop('language', None)
+    default_spelling = bool(document.pop('spelling', False))
+    default_positions = bool(document.pop('positions', False))
 
     try:
         endpoints = document['endpoints']
@@ -88,13 +89,12 @@ def index_parser(document):
     except KeyError:
         endpoints = None
 
-    document_values = []
-    _document_values = document.get('values', {})
-    if not isinstance(_document_values, dict):
+    document_values = document.pop('values', {})
+    if not isinstance(document_values, dict):
         return ">> ERR: [400] 'values' must be an object"
 
     document_terms = []
-    _document_terms = document.get('terms', [])
+    _document_terms = document.pop('terms', [])
     if not isinstance(_document_terms, list):
         return ">> ERR: [400] 'terms' must be a list of objects"
     for texts in _document_terms:
@@ -111,7 +111,7 @@ def index_parser(document):
         document_terms.append((term, weight, prefix, position))
 
     document_texts = []
-    _document_texts = document.get('texts', [])
+    _document_texts = document.pop('texts', [])
     if not isinstance(_document_texts, list):
         return ">> ERR: [400] 'texts' must be a list of objects"
     for texts in _document_texts:
@@ -134,6 +134,9 @@ def index_parser(document):
         if positions == default_positions:
             positions = None
         document_texts.append((text, weight, prefix, language, spelling, positions))
+
+    if document:
+        return ">> ERR: [400] Unknown document fields: %s" % ', '.join(document)
 
     document = (
         document_id,
