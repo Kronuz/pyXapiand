@@ -37,9 +37,10 @@ def command(threaded=False, **kwargs):
 
 
 class ClientReceiver(object):
-    delimiter = '\r\n'
+    delimiter = b'\r\n'
 
-    def __init__(self, server, client_socket, address, log=None):
+    def __init__(self, server, client_socket, address, log=None,
+                 encoding='utf-8', encoding_errors='strict'):
         self.log = log
         self.server = server
         self.address = address
@@ -47,6 +48,8 @@ class ClientReceiver(object):
         self.client_socket = client_socket
         self.socket_file = client_socket.makefile()
         self.closed = False
+        self.encoding = encoding
+        self.encoding_errors = encoding_errors
 
     def close(self):
         self.closed = True
@@ -95,7 +98,8 @@ class ClientReceiver(object):
         pass
 
     def sendLine(self, line):
-        self.socket_file.write(line.encode('utf8') + self.delimiter)
+        line += self.delimiter
+        self.socket_file.write(line.encode(self.encoding, self.encoding_errors))
         self.socket_file.flush()
 
     def lineReceived(self, line):
@@ -158,7 +162,7 @@ class CommandReceiver(ClientReceiver):
         self.log.info("Lost connection from %s:%d (%d open connections)" % (self.address[0], self.address[1], len(self.server.clients)))
 
     def lineReceived(self, line):
-        line = line.decode('utf-8')
+        line = line.decode(self.encoding, self.encoding_errors)
         cmd, _, line = line.partition(' ')
         cmd = cmd.strip().lower()
         line = line.strip()
