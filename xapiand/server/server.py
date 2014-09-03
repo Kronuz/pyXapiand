@@ -305,7 +305,6 @@ def _database_command(databases_pool, cmd, db, args, data='.', log=None):
     else:
         arg = ''
     docid = None
-    log.debug("Executing %s(%s)... (db:%s)", cmd, arg, db)
     try:
         if cmd == 'INDEX':
             docid = xapian_index(databases_pool, db, *args, data=data, log=log)
@@ -324,7 +323,7 @@ def _database_command(databases_pool, cmd, db, args, data='.', log=None):
         raise
     duration = time.time() - start
     docid = ' -> %s' % docid if docid else ''
-    log.info("Executed %s %s(%s)%s (db:%s) ~ %0.3f ms", "unknown command" if unknown else "command", cmd, arg, docid, db, duration)
+    log.debug("Executed %s %s(%s)%s (db:%s) ~ %0.3f ms", "unknown command" if unknown else "command", cmd, arg, docid, db, duration)
     return db if cmd in ('INDEX', 'DELETE') else None  # Return db if it needs to be committed.
 
 
@@ -456,7 +455,7 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
     timeout = min(max(int(round(commit_timeout * 0.3)), 1), 3)
     commit_slots = commit_slots or multiprocessing.cpu_count()
     mode = "with multiple threads and %s commit slots" % commit_slots
-    log.info("Starting Xapiand %s [%s]", mode, loglevel)
+    log.info("Starting Xapiand %s [%s] (pid:%s)", mode, loglevel, os.getpid())
 
     commit_lock = threading.Semaphore(commit_slots)
     timeouts = Obj(
@@ -470,7 +469,6 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
         port = ':%s' % port
     server = XapianServer(port, data=data, log=log)
 
-    log.debug("Starting worker...")
     databases_pool = {}
     databases = {}
     to_commit = {}
@@ -484,8 +482,6 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
             log.info("Hitting Ctrl+C again will terminate all running tasks!")
         elif sig:
             log.info("Sending the signal again will terminate all running tasks! (%s)", sig)
-        else:
-            log.info("Stopping Xapian!")
 
         if sig:
             if STOPPED:
@@ -496,7 +492,7 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
                     log.info("Forcing shutdown...")
                     server.close()
             else:
-                log.info("Warm shutdown...")
+                log.info("Warm shutdown... (%d open connections)", len(server.clients))
                 server.close()
 
         STOPPED = now
@@ -535,8 +531,6 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
     except OSError:
         log.error("Cannot write to endpoints file '%s'!", endpoints)
         epfile = None
-
-    log.info("Worker started! (pid:%s)", os.getpid())
 
     msg = None
     timeout = timeouts.timeout
@@ -597,4 +591,4 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
     for t, tq in databases.values():
         t.join()
 
-    log.info("Worker ended! (pid:%s)", os.getpid())
+    log.info("Xapian ended! (pid:%s)", os.getpid())

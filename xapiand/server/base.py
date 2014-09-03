@@ -1,5 +1,6 @@
 from __future__ import unicode_literals, absolute_import
 
+import time
 import threading
 
 from functools import wraps
@@ -142,12 +143,12 @@ class CommandReceiver(ClientReceiver):
     welcome = "# Welcome to the server! Type quit to exit."
 
     def connectionMade(self):
-        self.log and self.log.debug("Connection made from %s:%d - There are currently %d open connections." % (self.address[0], self.address[1], len(self.server.clients)))
+        self.log and self.log.info("New connection from %s:%d (%d open connections)" % (self.address[0], self.address[1], len(self.server.clients)))
         if self.welcome:
             self.sendLine(self.welcome)
 
     def connectionLost(self):
-        self.log and self.log.debug("Connection lost from %s:%d - There are currently %d open connections." % (self.address[0], self.address[1], len(self.server.clients)))
+        self.log and self.log.info("Lost connection from %s:%d (%d open connections)" % (self.address[0], self.address[1], len(self.server.clients)))
 
     def lineReceived(self, line):
         line = line.decode('utf-8')
@@ -156,15 +157,19 @@ class CommandReceiver(ClientReceiver):
         line = line.strip()
         if not cmd:
             return
+        start = time.time()
         try:
             func = getattr(self, cmd)
             if not func.command:
                 raise AttributeError
         except AttributeError:
-            self.sendLine(">> ERR: [404] Unknown command: %s" % cmd)
-            self.log and self.log.debug("Unknown command: %s" % cmd)
+            unknown = True
+            self.sendLine(">> ERR: [404] Unknown command: %s" % cmd.upper())
         else:
+            unknown = False
             self.dispatch(func, line)
+        duration = time.time() - start
+        self.log and self.log.debug("Executed %s %s (%s:%d) ~ %0.3f ms", "unknown command" if unknown else "command", cmd.upper(), self.address[0], self.address[1], duration)
 
     @command
     def quit(self, line):
