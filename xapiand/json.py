@@ -91,28 +91,27 @@ def xapian_decoder(data):
     return data
 
 
-def dump(fp, **kwargs):
+def dump(obj, fp, **kwargs):
     if 'ensure_ascii' not in kwargs:
         kwargs['ensure_ascii'] = False
-    try:
-        return json.dumps(fp, cls=XapianJSONEncoder, **kwargs)
-    except Exception:
+    if 'encoding' not in kwargs:
         kwargs['encoding'] = 'safe-utf-8'
-        return json.dumps(fp, cls=XapianJSONEncoder, **kwargs)
+    return json.dump(obj, fp, cls=XapianJSONEncoder, **kwargs)
 
 
 def dumps(value, **kwargs):
-    if 'ensure_ascii' not in kwargs:
-        kwargs['ensure_ascii'] = False
-    try:
-        return json.dumps(value, cls=XapianJSONEncoder, **kwargs)
-    except Exception:
+    ensure_ascii = kwargs.pop('ensure_ascii', True)
+    kwargs['ensure_ascii'] = False
+    if 'encoding' not in kwargs:
         kwargs['encoding'] = 'safe-utf-8'
-        return json.dumps(value, cls=XapianJSONEncoder, **kwargs)
+    dump = json.dumps(value, cls=XapianJSONEncoder, **kwargs)
+    if ensure_ascii:
+        dump = dump.encode('safe-utf-8')
+    return dump
 
 
 def load(fp, **kwargs):
-    return json.loads(fp, object_hook=xapian_decoder, **kwargs)
+    return json.load(fp, object_hook=xapian_decoder, **kwargs)
 
 
 def loads(value, **kwargs):

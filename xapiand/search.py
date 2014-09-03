@@ -168,7 +168,7 @@ class Search(object):
                         'facet': name,
                         'term': facet.term.decode('utf-8'),
                         'termfreq': facet.termfreq,
-                    })
+                    }, ensure_ascii=False)
 
         produced = 0
         for match in matches:
@@ -196,7 +196,7 @@ class Search(object):
                 result.update({
                     'terms': [t.term.decode('utf-8') for t in match.document.termlist()],
                 })
-            yield json.dumps(result)
+            yield json.dumps(result, ensure_ascii=False)
 
         if self.size is None:
             self.size = produced

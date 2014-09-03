@@ -58,14 +58,14 @@ class XapianReceiver(CommandReceiver):
         self.data = data
         self.endpoints = None
         self.database = None
-        self._reopen = False
+        self._do_reopen = False
 
     def dispatch(self, func, line):
         if getattr(func, 'db', False) and not self.endpoints:
             self.sendLine(">> ERR: %s" % "You must connect to a database first")
             return
-        if getattr(func, 'reopen', False) and self._reopen:
-            self.reopen()
+        if getattr(func, 'reopen', False) and self._do_reopen:
+            self._reopen()
         super(XapianReceiver, self).dispatch(func, line)
 
     @command
@@ -79,6 +79,11 @@ class XapianReceiver(CommandReceiver):
         self.sendLine(">> OK: %s" % version)
     ver = version
 
+    def _reopen(self):
+        _xapian_init(self.endpoints, queue=main_queue, data=self.data, log=self.log)
+        self.database = xapian_database(self.server.databases_pool, self.endpoints, False, data=self.data, log=self.log)
+        self._do_reopen = False
+
     @command(db=True)
     def reopen(self, line=''):
         """
@@ -90,9 +95,8 @@ class XapianReceiver(CommandReceiver):
         Usage: REOPEN
 
         """
-        _xapian_init(self.endpoints, queue=main_queue, data=self.data, log=self.log)
-        self.database = xapian_database(self.server.databases_pool, self.endpoints, False, data=self.data, log=self.log)
-        self._reopen = False
+        self._reopen()
+        self.sendLine(">> OK")
 
     @command
     def using(self, line=''):
@@ -108,7 +112,7 @@ class XapianReceiver(CommandReceiver):
         endpoints = tuple(line.split())
         if endpoints:
             self.endpoints = endpoints
-            self.reopen()
+            self._reopen()
         if self.endpoints:
             self.sendLine(">> OK")
         else:
@@ -192,7 +196,7 @@ class XapianReceiver(CommandReceiver):
     """
 
     def _delete(self, line, commit):
-        self._reopen = True
+        self._do_reopen = True
         for db in self.endpoints:
             _xapian_delete(db, line, commit=commit, data=self.data, log=self.log)
         self.sendLine(">> OK")
@@ -218,7 +222,7 @@ class XapianReceiver(CommandReceiver):
         self._delete(line, True)
 
     def _index(self, line, commit):
-        self._reopen = True
+        self._do_reopen = True
         result = index_parser(line)
         if isinstance(result, tuple):
             endpoints, document = result
@@ -254,7 +258,7 @@ class XapianReceiver(CommandReceiver):
         Usage: COMMIT
 
         """
-        self._reopen = True
+        self._do_reopen = True
         for db in self.endpoints or self.endpoints:
             _xapian_commit(db, data=self.data, log=self.log)
         self.sendLine(">> OK")

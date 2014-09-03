@@ -74,7 +74,7 @@ def index_parser(document):
     if not document_data:
         return ">> ERR: [400] You must provide 'data' to index"
     try:
-        document_data = json.dumps(document_data)
+        document_data = json.dumps(document_data, ensure_ascii=False).encode('safe-utf-8')
     except:
         return ">> ERR: [400] 'data' must be a valid json serializable object"
 

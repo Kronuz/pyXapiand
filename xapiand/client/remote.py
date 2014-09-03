@@ -81,11 +81,11 @@ class XapianConnection(Connection):
 
     @command
     def index(self, obj):
-        return self._response(self.execute_command('INDEX', json.dumps(obj)))
+        return self._response(self.execute_command('INDEX', json.dumps(obj, ensure_ascii=False)))
 
     @command
     def cindex(self, obj):
-        return self._response(self.execute_command('CINDEX', json.dumps(obj)))
+        return self._response(self.execute_command('CINDEX', json.dumps(obj, ensure_ascii=False)))
 
     @command
     def commit(self):

@@ -232,18 +232,6 @@ class Connection(object):
                 pass
             self._sock = None
 
-    def encode(self, value):
-        "Return a bytestring representation of the value"
-        if isinstance(value, bytes):
-            return value
-        if isinstance(value, float):
-            value = repr(value)
-        if not isinstance(value, six.string_types):
-            value = "%s" % value
-        if isinstance(value, six.text_type):
-            value = value.encode(self.encoding, self.encoding_errors)
-        return value
-
     def send(self, body):
         if not self._sock:
             self.connect()
@@ -293,7 +281,7 @@ class Connection(object):
                 # print '>>', repr(response)
                 if response and response[0] == '#':
                     continue
-                return response
+                return response.decode(self.encoding, self.encoding_errors)
             except (socket.error, socket.timeout):
                 self.disconnect()
                 exc_info = sys.exc_info()
@@ -310,7 +298,7 @@ class Connection(object):
     def execute_command(self, command_name, *args):
         command = self.pack_command(command_name, *args)
         # print '<<', repr(command)
-        self.send(command)
+        self.send(command.encode(self.encoding, self.encoding_errors))
         return self.read()
 
 
