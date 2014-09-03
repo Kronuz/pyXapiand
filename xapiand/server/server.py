@@ -185,10 +185,10 @@ class XapianReceiver(CommandReceiver):
 
     Usage: COUNT [query]
 
-    Format of the query:
-        [query_string]
-            [PARTIAL <partial ...>] ...
-            [TERMS <term ...>]
+    The query can have any or a mix of:
+        SEARCH query_string
+        PARTIAL <partial ...> [PARTIAL <partial ...>]...
+        TERMS <term ...>
     """
 
     def _delete(self, line, commit):

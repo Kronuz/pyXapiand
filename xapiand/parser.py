@@ -154,14 +154,14 @@ def index_parser(document):
 
 def search_parser(query_string):
     """
-    Format of the query:
-        [query_string]
-            [PARTIAL <partial ...>] ...
-            [TERMS <term ...>]
-            [FACETS <min> <field_name ...>] ...
-            [OFFSET <offset>]
-            [LIMIT <limit>]
-            [ORDER BY <field_name ...> [ASC|DESC]]
+    The query can have any or a mix of:
+        SEARCH query_string
+        PARTIAL <partial ...> [PARTIAL <partial ...>]...
+        TERMS <term ...>
+        FACETS <min> <field_name ...>
+        OFFSET <offset>
+        LIMIT <limit>
+        ORDER BY <field_name ...> [ASC|DESC]
     """
     first = 0
     partials = []

@@ -104,16 +104,16 @@ Format of the JSON object to index (only "id" and "data" are required):
 Searching
 =========
 
-Format of the queries:
+The query can have any or a mix of:
 
 ```
-    SEARCH [query_string]
-        [PARTIAL <partial ...>] ...
-        [TERMS <term ...>]
-        [FACETS [min] <field_name ...>] ...
-        [OFFSET <offset>]
-        [LIMIT <limit>]
-        [ORDER BY <field_name ...> [ASC|DESC]]
+    SEARCH query_string
+    PARTIAL <partial ...> [PARTIAL <partial ...>]...
+    TERMS <term ...>
+    FACETS <min> <field_name ...>
+    OFFSET <offset>
+    LIMIT <limit>
+    ORDER BY <field_name ...> [ASC|DESC]
 ```
 
 
