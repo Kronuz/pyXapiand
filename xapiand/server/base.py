@@ -220,11 +220,11 @@ class CommandReceiver(ClientReceiver):
                             docs[command] = [_help, []]
                         docs[command][1].append(_cmd)
                         length = max(length, len(_cmd))
-                pat = "  %%%ds" % length
+                pat = "  %%%ds," % length
                 for _help, _cmds in docs.values():
-                    _doc = [pat % _cmd for _cmd in _cmds]
-                    _doc[-1] += " - %s" % _help
+                    _doc = [pat % _cmd.upper() for _cmd in _cmds]
+                    _doc[-1] = "%s - %s" % (_doc[-1][:-1], _help)
                     doc.extend(_doc)
             # Indent and send results:
             doc = self.delimiter.join("    " + l for l in doc)
-            self.sendLine(">> OK: %s::\n%s" % (cmd, doc))
+            self.sendLine(">> OK: %s::\n%s" % (cmd.upper(), doc))
