@@ -1,14 +1,14 @@
 from __future__ import unicode_literals, absolute_import
 
-import json
 import base64
 from hashlib import md5
 
 import xapian
 
+from . import json
 from .core import xapian_reopen, KEY_RE
 from .parser import search_parser
-from .utils import normalize
+from .serialise import normalize
 
 
 class Search(object):

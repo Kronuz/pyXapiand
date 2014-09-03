@@ -171,6 +171,8 @@ class CommandReceiver(ClientReceiver):
         """
         Closes connection with server.
 
+        Usage: QUIT
+
         """
         self.sendLine(">> BYE!")
         raise QuitCommand
@@ -194,7 +196,7 @@ class CommandReceiver(ClientReceiver):
         """
         Returns help for any and all available commands.
 
-        Usage: help [command]
+        Usage: HELP [command]
 
         """
         cmd = line.strip().lower() or 'help'

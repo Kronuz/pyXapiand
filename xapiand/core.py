@@ -6,8 +6,8 @@ from hashlib import md5
 
 import xapian
 
-from .utils import normalize
 from .exceptions import InvalidIndexError
+from .serialise import serialise_value, normalize
 
 KEY_RE = re.compile(r'[_a-z][_a-z0-9]*')
 
@@ -151,28 +151,30 @@ def xapian_index(databases_pool, db, document, commit=False, data='.', log=None)
 
     document = xapian.Document()
 
-    for name in document_values or dict():
+    for name, value in (document_values or {}).items():
         name = name.strip().lower()
         if KEY_RE.match(name):
             slot = int(md5(name.lower()).hexdigest(), 16) & 0xffffffff
-            document.add_value(slot, document_values[name])
+            document.add_value(slot, serialise_value(value))
         else:
             log.warning("Ignored document value name (%r)", name)
 
-    document.add_term(document_id)  # Make sure document_id is also a term (otherwise it doesn't replace an existing document)
+    document.add_boolean_term(document_id)  # Make sure document_id is also a term (otherwise it doesn't replace an existing document)
     for term in document_terms or ():
         if isinstance(term, (tuple, list)):
-            term, weight, prefix = (list(term) + [None] * 3)[:3]
+            term, weight, prefix, position = (list(term) + [None] * 4)[:4]
         else:
-            weight = prefix = None
+            weight = prefix = position = None
         if not term:
             continue
 
         weight = 1 if weight is None else weight
         prefix = '' if prefix is None else prefix
 
-        term = normalize(term)
-        document.add_term(prefix + term, weight)
+        if position is None:
+            document.add_term(prefix + normalize(serialise_value(term)), weight)
+        else:
+            document.add_posting(prefix + normalize(serialise_value(term)), position, weight)
 
     for text in document_texts or ():
         if isinstance(text, (tuple, list)):
@@ -199,8 +201,7 @@ def xapian_index(databases_pool, db, document, commit=False, data='.', log=None)
             index_text = term_generator.index_text_without_positions
         if spelling:
             term_generator.set_flags(xapian.TermGenerator.FLAG_SPELLING)
-        text = normalize(text)
-        index_text(text, weight, prefix)
+        index_text(normalize(text), weight, prefix)
 
     if document_data:
         document.set_data(document_data)

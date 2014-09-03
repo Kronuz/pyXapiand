@@ -1,7 +1,5 @@
 from __future__ import unicode_literals, absolute_import
 
-import unicodedata
-
 
 def colored_logging(logging):
     """
@@ -30,11 +28,3 @@ def colored_logging(logging):
             return fn(*args)
         return new
     logging.StreamHandler.emit = add_coloring_to_emit_ansi(logging.StreamHandler.emit)
-
-
-def normalize(text):
-    """
-    Utility method that converts strings to strings without accents and stuff.
-
-    """
-    return ''.join(c for c in unicodedata.normalize('NFKD', unicode(text)) if not unicodedata.combining(c))

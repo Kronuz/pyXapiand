@@ -1,6 +1,6 @@
 from __future__ import absolute_import, unicode_literals
 
-import json
+from .. import json
 
 from ..exceptions import XapianError
 from .connection import Connection, ServerPool, command

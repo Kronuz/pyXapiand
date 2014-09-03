@@ -1,6 +1,6 @@
 from __future__ import absolute_import, unicode_literals
 
-import json
+from .. import json
 
 from .. import version
 from ..core import xapian_index, xapian_commit, xapian_delete, xapian_database, xapian_reopen

@@ -1,7 +1,9 @@
 from __future__ import unicode_literals, absolute_import
 
 import re
-import json
+
+from . import json
+
 
 SPLIT_RE = re.compile(r'\s*,\s*|\s+')
 
@@ -18,42 +20,41 @@ CMDS_RE = re.compile(r'\b(OFFSET|LIMIT|ORDER\s+BY|FACETS|PARTIAL|SEARCH|TERMS)\s
 
 def index_parser(document):
     """
-    Receives a json dictionary to index.
-        "id" is the only required field
+    Format of the JSON object to index (only "id" and "data" are required):
+        {
+            "id": "<document_id_string>",
+            "data": <data_object>,
 
-    {
-        "id": <DOCUMENT_ID_STRING>,
-        "data": <DATA_OBJECT>,
-
-        "endpoints": [
-            <ENDPOINT_n>,
-            ...
-        ],
-        "values": {
-            <KEY_n>: <VALUE_n>,
-            ...
-        },
-        "terms": [
-            {
-                "term": <TERM_n_STRING>,
-                "weight": <TERM_n_WEIGHT>,
-                "prefix": <TERM_n_PREFIX>
+            "values": {
+                "<key_N>": <value_N>,
+                ...
             },
-            ...
-        ],
-        "texts": [
-            {
-                "text": <TEXT_n_STRING>,
-                "weight": <TEXT_n_WEIGHT>,
-                "prefix": <TEXT_n_PREFIX>
-                "language": <TEXT_n_LANGUAGE>
-            },
-            ...
-        ]
-        "language": <LANGUAGE>,
-        "spelling: False,
-        "positions: False,
-    }
+            "terms": [
+                {
+                    "term": "<term_N_string>",
+                    "weight": [term_N_weight],
+                    "prefix": "[term_N_prefix]",
+                    "position": [term_N_position]
+                },
+                ...
+            ],
+            "texts": [
+                {
+                    "text": "<text_N_string>",
+                    "weight": [text_N_weight],
+                    "prefix": "[text_N_prefix]",
+                    "language": [text_N_language]
+                },
+                ...
+            ],
+            "endpoints": [
+                "<endpoint_N>",
+                ...
+            ],
+            "language": "<language>",
+            "spelling": False,
+            "positions": False
+        }
 
     """
     try:
@@ -106,7 +107,8 @@ def index_parser(document):
             return ">> ERR: [400] 'term' is required"
         weight = get('weight')
         prefix = get('prefix')
-        document_terms.append((term, weight, prefix))
+        position = get('position')
+        document_terms.append((term, weight, prefix, position))
 
     document_texts = []
     _document_texts = document.get('texts', [])
@@ -148,6 +150,16 @@ def index_parser(document):
 
 
 def search_parser(query_string):
+    """
+    Format of the query:
+        [query_string]
+            [PARTIAL <partial ...>] ...
+            [TERMS <term ...>]
+            [FACETS <min> <field_name ...>] ...
+            [OFFSET <offset>]
+            [LIMIT <limit>]
+            [ORDER BY <field_name ...> [ASC|DESC]]
+    """
     first = 0
     partials = []
     maxitems = 10000

@@ -20,7 +20,7 @@ from .. import version
 from ..core import xapian_database, xapian_commit, xapian_index, xapian_delete
 from ..platforms import create_pidlock
 from ..utils import colored_logging
-from ..parser import index_parser
+from ..parser import index_parser, search_parser
 from ..search import Search
 
 from .base import CommandReceiver, CommandServer, command
@@ -70,17 +70,41 @@ class XapianReceiver(CommandReceiver):
 
     @command
     def version(self, line):
+        """
+        Returns the version of the Xapiand server.
+
+        Usage: VERSION
+
+        """
         self.sendLine(">> OK: %s" % version)
     ver = version
 
     @command(db=True)
     def reopen(self, line=''):
+        """
+        Re-open the endpoint(s).
+
+        This re-opens the endpoint(s) to the latest available version(s). It
+        can be used either to make sure the latest results are returned.
+
+        Usage: REOPEN
+
+        """
         _xapian_init(self.endpoints, queue=main_queue, data=self.data, log=self.log)
         self.database = xapian_database(self.server.databases_pool, self.endpoints, False, data=self.data, log=self.log)
         self._reopen = False
 
     @command
     def using(self, line=''):
+        """
+        Start using the specified endpoint(s).
+
+        Local paths as well as remote databases are allowed as endpoints.
+        More than one endpoint can be specified, separated by spaces.
+
+        Usage: USING <endpoint> [endpoint ...]
+
+        """
         endpoints = tuple(line.split())
         if endpoints:
             self.endpoints = endpoints
@@ -115,14 +139,29 @@ class XapianReceiver(CommandReceiver):
     @command(threaded=True, db=True, reopen=True)
     def terms(self, line):
         self._search(line, get_matches=True, get_data=False, get_terms=True, get_size=False)
+    terms.__doc__ = """
+    Finds and lists the terms of the documents.
+
+    Usage: TERMS <query>
+    """ + search_parser.__doc__
 
     @command(threaded=True, db=True, reopen=True)
     def find(self, line):
         self._search(line, get_matches=True, get_data=False, get_terms=False, get_size=False)
+    find.__doc__ = """
+    Finds documents.
+
+    Usage: FIND <query>
+    """ + search_parser.__doc__
 
     @command(threaded=True, db=True, reopen=True)
     def search(self, line):
         self._search(line, get_matches=True, get_data=True, get_terms=False, get_size=False)
+    search.__doc__ = """
+    Search documents.
+
+    Usage: SEARCH <query>
+    """ + search_parser.__doc__
 
     @command(db=True, reopen=True)
     def count(self, line=''):
@@ -132,6 +171,16 @@ class XapianReceiver(CommandReceiver):
         else:
             size = self.database.get_doccount()
             self.sendLine(">> OK: %s documents found in %sms" % (size, 1000.00 * (time.time() - start)))
+    count.__doc__ = """
+    Counts matching documents.
+
+    Usage: COUNT [query]
+
+    Format of the query:
+        [query_string]
+            [PARTIAL <partial ...>] ...
+            [TERMS <term ...>]
+    """
 
     def _delete(self, line, commit):
         self._reopen = True
@@ -141,10 +190,22 @@ class XapianReceiver(CommandReceiver):
 
     @command(db=True)
     def delete(self, line):
+        """
+        Deletes a document.
+
+        Usage: DELETE <id>
+
+        """
         self._delete(line, False)
 
     @command(db=True)
     def cdelete(self, line):
+        """
+        Deletes a document and commit.
+
+        Usage: CDELETE <id>
+
+        """
         self._delete(line, True)
 
     def _index(self, line, commit):
@@ -161,13 +222,29 @@ class XapianReceiver(CommandReceiver):
     @command(db=True)
     def index(self, line):
         self._index(line, False)
+    index.__doc__ = """
+    Index document.
+
+    Usage: INDEX <json>
+    """ + index_parser.__doc__
 
     @command(db=True)
     def cindex(self, line):
         self._index(line, True)
+    cindex.__doc__ = """
+    Index document and commit.
+
+    Usage: CINDEX <json>
+    """ + index_parser.__doc__
 
     @command(db=True)
     def commit(self, line=''):
+        """
+        Commits changes to the database.
+
+        Usage: COMMIT
+
+        """
         self._reopen = True
         for db in self.endpoints or self.endpoints:
             _xapian_commit(db, data=self.data, log=self.log)
