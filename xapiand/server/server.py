@@ -10,8 +10,13 @@ from hashlib import md5
 import threading
 import multiprocessing
 
-# from .redis import RedisQueue as PQueue
-from .fqueue import FileQueue as PQueue
+try:
+    from .redis import RedisQueue
+except ImportError:
+    RedisQueue = None
+from .fqueue import FileQueue
+from .memory import MemoryQueue
+PQueue = None
 
 import gevent
 from gevent import queue
@@ -327,7 +332,7 @@ def _database_command(databases_pool, cmd, db, args, data='.', log=None):
         raise
     duration = time.time() - start
     docid = ' -> %s' % docid if docid else ''
-    log.debug("Executed %s %s(%s)%s (db:%s) ~ %0.3f ms", "unknown command" if unknown else "command", cmd, arg, docid, db, duration)
+    log.debug("Executed %s %s(%s)%s (db:%s) ~ %0.3f s", "unknown command" if unknown else "command", cmd, arg, docid, db, duration)
     return db if cmd in ('INDEX', 'DELETE') else None  # Return db if it needs to be committed.
 
 
@@ -431,9 +436,9 @@ def _thread_loop(databases_pool, db, tq, commit_lock, timeouts, data, log):
 
 
 def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=0,
-               working_directory=None, loglevel='', commit_slots=None, commit_timeout=None,
-               port=None, **options):
-    global STOPPED
+               working_directory=None, verbosity=2, commit_slots=None, commit_timeout=None,
+               port=None, queue=None, **options):
+    global PQueue, STOPPED
 
     log = logger
 
@@ -449,7 +454,7 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
             console = logging.StreamHandler(sys.stderr)
             console.setFormatter(formatter)
             log.addHandler(console)
-    loglevel = loglevel.upper()
+    loglevel = ['ERROR', 'WARNING', 'INFO', 'DEBUG'][int(verbosity)]
     if not hasattr(logging, loglevel):
         loglevel = 'INFO'
     _loglevel = getattr(logging, loglevel)
@@ -458,8 +463,15 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
         commit_timeout = COMMIT_TIMEOUT
     timeout = min(max(int(round(commit_timeout * 0.3)), 1), 3)
     commit_slots = commit_slots or multiprocessing.cpu_count()
-    mode = "with multiple threads and %s commit slots" % commit_slots
-    log.info("Starting Xapiand %s [%s] (pid:%s)", mode, loglevel, os.getpid())
+    if queue == 'redis' and RedisQueue:
+        PQueue = RedisQueue
+    elif queue == 'file':
+        PQueue = FileQueue
+    else:
+        PQueue = MemoryQueue
+    mode = "with multiple threads and %s commit slots using %s" % (commit_slots, PQueue.__name__)
+
+    log.warning("Starting Xapiand %s [%s] (pid:%s)", mode, loglevel, os.getpid())
 
     commit_lock = threading.Semaphore(commit_slots)
     timeouts = Obj(
@@ -483,24 +495,25 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
         now = time.time()
 
         if sig == signal.SIGINT:
-            log.info("Hitting Ctrl+C again will terminate all running tasks!")
+            log.warning("Hitting Ctrl+C again will terminate all running tasks!")
         elif sig:
-            log.info("Sending the signal again will terminate all running tasks! (%s)", sig)
+            log.warning("Sending the signal again will terminate all running tasks! (%s)", sig)
+
+        stopped = STOPPED
+        PQueue.STOPPED = STOPPED = now
 
         if sig:
-            if STOPPED:
-                if now - STOPPED < 1:
+            if stopped:
+                if now - stopped < 0.5:
+                    log.error("Killing process!...")
                     sys.exit(-1)
                     return
-                if now > STOPPED + 5:
-                    log.info("Forcing shutdown...")
+                if now - stopped > 2:
+                    log.error("Forcing shutdown...")
                     server.close()
             else:
                 log.info("Warm shutdown... (%d open connections)", len(server.clients))
                 server.close()
-
-        STOPPED = now
-        PQueue.STOPPED = STOPPED
 
     gevent.signal(signal.SIGQUIT, _server_stop, signal.SIGQUIT)
     gevent.signal(signal.SIGTERM, _server_stop, signal.SIGTERM)
@@ -595,4 +608,4 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
     for t, tq in databases.values():
         t.join()
 
-    log.info("Xapian ended! (pid:%s)", os.getpid())
+    log.warning("Xapian ended! (pid:%s)", os.getpid())

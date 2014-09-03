@@ -129,11 +129,11 @@ class CommandServer(StreamServer):
 
     def close(self):
         if self.closed:
-            self.log and self.log.debug("Closing clients...")
+            self.log.debug("Closing clients...")
             for client in self.clients:
                 client.client_socket._sock.close()
         else:
-            self.log and self.log.debug("Closing listener socket. Waiting for clients...")
+            self.log.debug("Closing listener socket. Waiting for clients...")
             super(CommandServer, self).close()
             for client in self.clients:
                 client.close()
@@ -142,13 +142,20 @@ class CommandServer(StreamServer):
 class CommandReceiver(ClientReceiver):
     welcome = "# Welcome to the server! Type quit to exit."
 
+    def __init__(self, *args, **kwargs):
+        super(CommandReceiver, self).__init__(*args, **kwargs)
+        self.cmd = None
+        self.cmd_duration = 0
+        self.cmd_start = 0
+        self.cmd_count = 0
+
     def connectionMade(self):
-        self.log and self.log.info("New connection from %s:%d (%d open connections)" % (self.address[0], self.address[1], len(self.server.clients)))
+        self.log.info("New connection from %s:%d (%d open connections)" % (self.address[0], self.address[1], len(self.server.clients)))
         if self.welcome:
             self.sendLine(self.welcome)
 
     def connectionLost(self):
-        self.log and self.log.info("Lost connection from %s:%d (%d open connections)" % (self.address[0], self.address[1], len(self.server.clients)))
+        self.log.info("Lost connection from %s:%d (%d open connections)" % (self.address[0], self.address[1], len(self.server.clients)))
 
     def lineReceived(self, line):
         line = line.decode('utf-8')
@@ -163,13 +170,21 @@ class CommandReceiver(ClientReceiver):
             if not func.command:
                 raise AttributeError
         except AttributeError:
-            unknown = True
             self.sendLine(">> ERR: [404] Unknown command: %s" % cmd.upper())
         else:
-            unknown = False
             self.dispatch(func, line)
-        duration = time.time() - start
-        self.log and self.log.debug("Executed %s %s (%s:%d) ~ %0.3f ms", "unknown command" if unknown else "command", cmd.upper(), self.address[0], self.address[1], duration)
+            now = time.time()
+            self.cmd_duration += now - start
+            self.cmd_count += 1
+            self.cmd = cmd
+            if now - self.cmd_start > 2 or self.cmd_count >= 10000:
+                if self.cmd_count == 1:
+                    self.log.debug("Executed command %s from %s:%d ~ %0.3f s", self.cmd.upper(), self.address[0], self.address[1], self.cmd_duration)
+                else:
+                    self.log.info("Executed %s commands from %s:%d ~ %0.3f s (%0.3f cps)", self.cmd_count, self.address[0], self.address[1], self.cmd_duration, self.cmd_count / self.cmd_duration)
+                self.cmd_start = now
+                self.cmd_duration = 0
+                self.cmd_count = 0
 
     @command
     def quit(self, line):
