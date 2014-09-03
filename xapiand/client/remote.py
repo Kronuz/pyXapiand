@@ -47,6 +47,11 @@ class XapianConnection(Connection):
             line = self.read()
 
     @command
+    def facets(self, query):
+        for r in self._search('FACETS', query):
+            yield r
+
+    @command
     def terms(self, query):
         for r in self._search('TERMS', query):
             yield r

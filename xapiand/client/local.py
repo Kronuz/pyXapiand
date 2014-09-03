@@ -49,6 +49,11 @@ class Xapian(object):
         )
         return search
 
+    def facets(self, query):
+        search = self._search('* FACETS %s LIMIT 0' % query, get_matches=False, get_data=False, get_terms=False, get_size=False)
+        for result in search.results:
+            yield json.loads(result)
+
     def terms(self, query):
         search = self._search(query, get_matches=True, get_data=False, get_terms=True, get_size=False)
         for result in search.results:

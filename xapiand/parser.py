@@ -9,11 +9,11 @@ SPLIT_RE = re.compile(r'\s*,\s*|\s+')
 
 OFFSET_RE = re.compile(r'\bOFFSET\s+(\d+)\b', re.IGNORECASE)
 LIMIT_RE = re.compile(r'\bLIMIT\s+(\d+)\b', re.IGNORECASE)
-ORDER_BY_RE = re.compile(r'\bORDER\s+BY\s+([-+_a-zA-Z0-9, ]+)(\s+ASC|\s+DESC)\b', re.IGNORECASE)
+ORDER_BY_RE = re.compile(r'\bORDER\s+BY\s+([-+_a-zA-Z0-9, ]+?)(\s+ASC\b|\s+DESC\b|$)', re.IGNORECASE)
 FACETS_RE = re.compile(r'\bFACETS\s+(\d+)?([_a-zA-Z0-9, ]+)\b', re.IGNORECASE)
 PARTIAL_RE = re.compile(r'\bPARTIAL\s+([_a-zA-Z0-9, *]+)\b', re.IGNORECASE)
-SEARCH_RE = re.compile(r'\bSEARCH\s+(.+)\b', re.IGNORECASE)
-TERMS_RE = re.compile(r'\bTERMS\s+(.+)\b', re.IGNORECASE)
+SEARCH_RE = re.compile(r'\bSEARCH\s+(.+)', re.IGNORECASE)
+TERMS_RE = re.compile(r'\bTERMS\s+(.+)', re.IGNORECASE)
 
 CMDS_RE = re.compile(r'\b(OFFSET|LIMIT|ORDER\s+BY|FACETS|PARTIAL|SEARCH|TERMS)\s', re.IGNORECASE)
 
@@ -183,7 +183,7 @@ def search_parser(query_string):
         if match:
             string = OFFSET_RE.sub('', string)
             first = int(match.group(1))
-            # print("offset: %s", first)
+            # print "offset:", first
             continue
 
         # Get maximum number of items (LIMIT):
@@ -191,7 +191,7 @@ def search_parser(query_string):
         if match:
             string = LIMIT_RE.sub('', string)
             maxitems = int(match.group(1))
-            # print("limit: %s", maxitems)
+            # print "limit:", maxitems
             continue
 
         # Get wanted order by:
@@ -200,7 +200,7 @@ def search_parser(query_string):
             string = ORDER_BY_RE.sub('', string)
             sort_by = SPLIT_RE.split(match.group(1).strip())
             sort_by_reversed = match.group(2) == 'DESC'
-            # print("order: %s", sort_by)
+            # print "order:", sort_by
             continue
 
         # Get wanted facets:
@@ -208,9 +208,12 @@ def search_parser(query_string):
         if match:
             string = FACETS_RE.sub('', string)
             spies = SPLIT_RE.split(match.group(2).strip())
-            check_at_least = spies and match.group(1)
-            check_at_least = int(check_at_least) if check_at_least else 0
-            # print("facets: %s", spies)
+            if spies:
+                if match.group(1):
+                    check_at_least = max(min(int(match.group(1)), check_at_least), 0)
+            else:
+                check_at_least = 0
+            # print "facets:", spies
             continue
 
         # Get partials (for autocomplete):
@@ -218,7 +221,7 @@ def search_parser(query_string):
         if match:
             string = PARTIAL_RE.sub('', string)
             partials.append(match.group(1).strip())
-            # print("partials: %s", partials)
+            # print "partials:", partials
             continue
 
         # Get terms filtering:
@@ -226,7 +229,7 @@ def search_parser(query_string):
         if match:
             string = TERMS_RE.sub('', string)
             terms = match.group(1).strip()
-            # print("terms: %s", terms)
+            # print "terms:", terms
             continue
 
         # Get searchs:
@@ -234,7 +237,7 @@ def search_parser(query_string):
         if match:
             string = SEARCH_RE.sub('', string)
             search = match.group(1).strip()
-            # print("search: %s", search)
+            # print "search:", search
             continue
 
     parsed = (
