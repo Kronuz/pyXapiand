@@ -137,6 +137,15 @@ class XapianReceiver(CommandReceiver):
         self.sendLine(">> OK: %s documents found in %sms" % (size, 1000.00 * (time.time() - start)))
 
     @command(threaded=True, db=True, reopen=True)
+    def facets(self, line):
+        self._search('* FACETS %s LIMIT 0' % line, get_matches=False, get_data=False, get_terms=False, get_size=False)
+    facets.__doc__ = """
+    Finds and lists the facets of a query.
+
+    Usage: FACETS <query>
+    """ + search_parser.__doc__
+
+    @command(threaded=True, db=True, reopen=True)
     def terms(self, line):
         self._search(line, get_matches=True, get_data=False, get_terms=True, get_size=False)
     terms.__doc__ = """

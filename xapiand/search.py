@@ -32,12 +32,12 @@ class Search(object):
         parsed = search_parser(query_string)
         first, maxitems, sort_by, sort_by_reversed, spies, check_at_least, partials, terms, search = parsed
 
-        maxitems = min(maxitems, doccount - first, 10000)
-        check_at_least = min(check_at_least, doccount, 10000)
+        maxitems = max(min(maxitems, doccount - first, 10000), 0)
+        check_at_least = max(min(check_at_least, doccount, 10000), 0)
 
         # Build final query:
         query = None
-        if search:
+        if search and search != '*':
             try:
                 query = xapian.Query.unserialise(search)
             except xapian.InvalidArgumentError:
@@ -96,7 +96,7 @@ class Search(object):
                 query = terms_query
 
         if not query:
-            if query_string.strip() == '*':
+            if search == '*':
                 query = xapian.Query('')
             else:
                 query = xapian.Query()
@@ -149,6 +149,9 @@ class Search(object):
         self.spies = spies
 
     def get_results(self):
+        if not self.get_matches:
+            self.maxitems = 0
+
         try:
             matches = self.enquire.get_mset(self.first, self.maxitems, self.check_at_least)
         except xapian.DatabaseModifiedError:
@@ -157,9 +160,6 @@ class Search(object):
 
         if self.get_size:
             self.size = matches.size()
-
-        if not self.get_matches:
-            return
 
         if self.spies:
             for name, spy in self.spies.items():
