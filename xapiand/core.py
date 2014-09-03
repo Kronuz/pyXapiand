@@ -159,7 +159,9 @@ def xapian_index(databases_pool, db, document, commit=False, data='.', log=None)
         else:
             log.warning("Ignored document value name (%r)", name)
 
-    document.add_boolean_term(document_id)  # Make sure document_id is also a term (otherwise it doesn't replace an existing document)
+    if isinstance(document_id, basestring):
+        document.add_boolean_term(document_id)  # Make sure document_id is also a term (otherwise it doesn't replace an existing document)
+
     for term in document_terms or ():
         if isinstance(term, (tuple, list)):
             term, weight, prefix, position = (list(term) + [None] * 4)[:4]
