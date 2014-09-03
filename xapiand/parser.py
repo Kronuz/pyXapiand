@@ -26,7 +26,7 @@ def index_parser(document):
             "data": <data_object>,
 
             "values": {
-                "<key_N>": <value_N>,
+                "<field_name_N>": <value_N>,
                 ...
             },
             "terms": [
