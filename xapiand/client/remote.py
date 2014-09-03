@@ -33,7 +33,7 @@ class XapianConnection(Connection):
         line = line.decode(self.encoding)
         if line.startswith(">>"):
             if line.startswith(">> OK"):
-                return line[7:]
+                return line[7:] or None
             if line.startswith(">> ERR"):
                 raise XapianError(line[8:])
 
