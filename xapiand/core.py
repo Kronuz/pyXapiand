@@ -9,7 +9,7 @@ import xapian
 from .exceptions import InvalidIndexError
 from .serialise import serialise_value, normalize
 
-KEY_RE = re.compile(r'[_a-z][_a-z0-9]*')
+KEY_RE = re.compile(r'[_a-zA-Z][_a-zA-Z0-9]*')
 
 
 def _xapian_database(databases_pool, endpoints, writable, data='.', log=None):
@@ -155,7 +155,8 @@ def xapian_index(databases_pool, db, document, commit=False, data='.', log=None)
         name = name.strip().lower()
         if KEY_RE.match(name):
             slot = int(md5(name.lower()).hexdigest(), 16) & 0xffffffff
-            document.add_value(slot, serialise_value(value))
+            value = serialise_value(value)
+            document.add_value(slot, value)
         else:
             log.warning("Ignored document value name (%r)", name)
 
@@ -173,10 +174,11 @@ def xapian_index(databases_pool, db, document, commit=False, data='.', log=None)
         weight = 1 if weight is None else weight
         prefix = '' if prefix is None else prefix
 
+        term = normalize(serialise_value(term))
         if position is None:
-            document.add_term(prefix + normalize(serialise_value(term)), weight)
+            document.add_term(prefix + term, weight)
         else:
-            document.add_posting(prefix + normalize(serialise_value(term)), position, weight)
+            document.add_posting(prefix + term, position, weight)
 
     for text in document_texts or ():
         if isinstance(text, (tuple, list)):

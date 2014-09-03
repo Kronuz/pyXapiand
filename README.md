@@ -31,7 +31,30 @@ Import client: `from xapiand import Xapian`
 
 Connect: `x = Xapian('localhost:8890', using=['example'])`
 
-Index a document: `x.index({"id": "doc2", "terms": [{"term": "test"}, {"term": "second"}], "data": "DATA"})`
+Index a couple documents:
+```
+	x.index({
+		"id": "doc2",
+		"data": "DATA",
+		"terms": [{"term": "test"}, {"term": "second"}],
+		"values": {
+			"date": datetime.datetime.now(),
+			"color": "blue",
+			"size": 2
+		}
+	})
+
+	x.index({
+	        "id": "doc3",
+	        "data": "DATA",
+	        "terms": [{"term": "test"}, {"term": "third"}],
+	        "values": {
+	                "date": datetime.datetime.now(),
+	                "color": "red",
+	                "size": 1.4
+	        }
+	})
+```
 
 Search for a document: `list(x.search('test'))`
 
@@ -87,7 +110,7 @@ Format of the queries:
     SEARCH [query_string]
         [PARTIAL <partial ...>] ...
         [TERMS <term ...>]
-        [FACETS <min> <field_name ...>] ...
+        [FACETS [min] <field_name ...>] ...
         [OFFSET <offset>]
         [LIMIT <limit>]
         [ORDER BY <field_name ...> [ASC|DESC]]
