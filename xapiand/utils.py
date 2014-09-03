@@ -1,5 +1,47 @@
 from __future__ import unicode_literals, absolute_import
 
+import re
+
+try:
+    from urllib.parse import unquote, urlparse, parse_qsl
+except ImportError:
+    from urllib import unquote                  # NOQA
+    from urlparse import urlparse, parse_qsl    # NOQA
+
+
+_MULTIPLE_PATHS = re.compile(r'/{2,}')
+
+
+def normalize_path(path):
+    if path:
+        path = path.replace('\\', '/')
+        path = _MULTIPLE_PATHS.sub('/', path)
+        if path[-1] == '/':
+            path = path[:-1]
+        if path.startswith('./'):
+            path = path[2:]
+    return path
+
+
+def parse_url(url):
+    parts = urlparse(url)
+    hostname = unquote(parts.hostname or '')
+    path = unquote(parts.path or '')
+    if parts.scheme:
+        path = path.lstrip('/')
+        scheme = parts.scheme
+        if scheme == 'file':
+            path, hostname = hostname + '/' + path, ''
+    else:
+        scheme = 'file'
+    return (scheme,
+            hostname or None,
+            parts.port or None,
+            unquote(parts.username or '') or None,
+            unquote(parts.password or '') or None,
+            normalize_path(path) or None,
+            dict(parse_qsl(parts.query)))
+
 
 def colored_logging(logging):
     """

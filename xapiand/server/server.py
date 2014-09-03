@@ -22,6 +22,7 @@ import gevent
 from gevent import queue
 
 from .. import version
+from ..exceptions import InvalidIndexError
 from ..core import xapian_database, xapian_commit, xapian_index, xapian_delete
 from ..platforms import create_pidlock
 from ..utils import colored_logging
@@ -55,7 +56,7 @@ class Obj(object):
 
 
 class XapianReceiver(CommandReceiver):
-    welcome = "# Welcome to Xapiand! Type quit to exit."
+    welcome = "# Welcome to Xapiand! Type QUIT to exit, HELP for help."
 
     def __init__(self, *args, **kwargs):
         data = kwargs.pop('data', '.')
@@ -64,6 +65,7 @@ class XapianReceiver(CommandReceiver):
         self.endpoints = None
         self.database = None
         self._do_reopen = False
+        self._do_init = False
 
     def dispatch(self, func, line):
         if getattr(func, 'db', False) and not self.endpoints:
@@ -84,10 +86,10 @@ class XapianReceiver(CommandReceiver):
         self.sendLine(">> OK: %s" % version)
     ver = version
 
-    def _reopen(self):
-        _xapian_init(self.endpoints, queue=main_queue, data=self.data, log=self.log)
-        self.database = xapian_database(self.server.databases_pool, self.endpoints, False, data=self.data, log=self.log)
+    def _reopen(self, create=False):
+        self.database = xapian_database(self.server.databases_pool, self.endpoints, False, create, data=self.data, log=self.log)
         self._do_reopen = False
+        self._do_init = True
 
     @command(db=True)
     def reopen(self, line=''):
@@ -100,8 +102,30 @@ class XapianReceiver(CommandReceiver):
         Usage: REOPEN
 
         """
-        self._reopen()
-        self.sendLine(">> OK")
+        try:
+            self._reopen()
+            self.sendLine(">> OK")
+        except InvalidIndexError as e:
+            self.sendLine(">> ERR: %s" % e)
+
+    @command
+    def create(self, line=''):
+        """
+        Creates a database.
+
+        Usage: CREATE <endpoint>
+
+        """
+        endpoint = line.strip()
+        if endpoint:
+            self.endpoints = (endpoint,)
+            try:
+                self._reopen(True)
+                self.sendLine(">> OK")
+            except InvalidIndexError as e:
+                self.sendLine(">> ERR: %s" % e)
+        else:
+            self.sendLine(">> ERR: [405] You must specify a valid endpoint for the database")
 
     @command
     def using(self, line=''):
@@ -117,11 +141,16 @@ class XapianReceiver(CommandReceiver):
         endpoints = tuple(line.split())
         if endpoints:
             self.endpoints = endpoints
-            self._reopen()
+            try:
+                self._reopen()
+            except InvalidIndexError as e:
+                self.sendLine(">> ERR: %s" % e)
+                return
         if self.endpoints:
             self.sendLine(">> OK")
         else:
             self.sendLine(">> ERR: [405] Select a database with the command USING")
+    open = using
 
     def _search(self, line, get_matches, get_data, get_terms, get_size):
         search = Search(
@@ -200,7 +229,13 @@ class XapianReceiver(CommandReceiver):
         TERMS <term ...>
     """
 
+    def _init(self):
+        if self._do_init:
+            _xapian_init(self.endpoints, queue=main_queue, data=self.data, log=self.log)
+            self._do_init = False
+
     def _delete(self, line, commit):
+        self._init()
         self._do_reopen = True
         for db in self.endpoints:
             _xapian_delete(db, line, commit=commit, data=self.data, log=self.log)
@@ -227,6 +262,7 @@ class XapianReceiver(CommandReceiver):
         self._delete(line, True)
 
     def _index(self, line, commit):
+        self._init()
         self._do_reopen = True
         result = index_parser(line)
         if isinstance(result, tuple):
@@ -263,6 +299,7 @@ class XapianReceiver(CommandReceiver):
         Usage: COMMIT
 
         """
+        self._init()
         self._do_reopen = True
         for db in self.endpoints or self.endpoints:
             _xapian_commit(db, data=self.data, log=self.log)

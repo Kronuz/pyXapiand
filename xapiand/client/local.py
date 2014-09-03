@@ -13,6 +13,7 @@ class Xapian(object):
     def __init__(self, *args, **kwargs):
         self.databases_pool = {}
         self.endpoints = None
+        self.data = kwargs.pop('data', '.')
         self.log = kwargs.pop('log', None)
         using = kwargs.pop('using', None)
         if using:
@@ -27,13 +28,17 @@ class Xapian(object):
 
     def reopen(self):
         self._check_db()
-        xapian_reopen(self.database, log=self.log)
+        xapian_reopen(self.database, data=self.data, log=self.log)
+
+    def create(self, endpoint):
+        self.endpoints = (endpoint,)
+        self.database = xapian_database({}, self.endpoints, False, True, data=self.data, log=self.log)
 
     def using(self, endpoints=None):
         if endpoints:
             assert isinstance(endpoints, (list, tuple)), "Endpoints must be a tuple"
             self.endpoints = tuple(endpoints)
-            self.database = xapian_database({}, self.endpoints, False, log=self.log)
+            self.database = xapian_database({}, self.endpoints, False, False, data=self.data, log=self.log)
 
     def _search(self, query, get_matches, get_data, get_terms, get_size):
         self._check_db()
@@ -80,7 +85,7 @@ class Xapian(object):
     def _delete(self, document_id, commit):
         self._check_db()
         for db in self.endpoints:
-            xapian_delete(self.databases_pool, db, commit=commit, log=self.log)
+            xapian_delete(self.databases_pool, db, commit=commit, data=self.data, log=self.log)
 
     def delete(self, obj):
         self._delete(obj, False)
@@ -95,7 +100,7 @@ class Xapian(object):
             return result
         endpoints, document = result
         for db in endpoints or self.endpoints:
-            xapian_index(self.databases_pool, db, document, commit=commit, log=self.log)
+            xapian_index(self.databases_pool, db, document, commit=commit, data=self.data, log=self.log)
 
     def index(self, obj):
         self._index(obj, False)
@@ -106,4 +111,4 @@ class Xapian(object):
     def commit(self):
         self._check_db()
         for db in self.endpoints:
-            xapian_commit(self.databases_pool, db, log=self.log)
+            xapian_commit(self.databases_pool, db, data=self.data, log=self.log)

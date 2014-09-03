@@ -21,13 +21,20 @@ class XapianConnection(Connection):
         return self._response(self.execute_command('REOPEN'))
 
     @command
+    def create(self, endpoint):
+        response = self._response(self.execute_command('CRETE', endpoint))
+        self.context.endpoints = [endpoint]
+        return response
+
+    @command
     def using(self, endpoints=None):
         if endpoints:
             assert isinstance(endpoints, (list, tuple)), "Endpoints must be a tuple"
+            response = self._response(self.execute_command('USING', ','.join(endpoints)))
             self.context.endpoints = endpoints
-            return self._response(self.execute_command('USING', ','.join(endpoints)))
         else:
-            return self._response(self.execute_command('USING'))
+            response = self._response(self.execute_command('USING'))
+        return response
 
     def _response(self, line):
         line = line.decode(self.encoding)
