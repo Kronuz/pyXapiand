@@ -183,7 +183,7 @@ def search_parser(query_string):
         if match:
             string = OFFSET_RE.sub('', string)
             first = int(match.group(1))
-            # log.debug("offset: %s", first)
+            # print("offset: %s", first)
             continue
 
         # Get maximum number of items (LIMIT):
@@ -191,7 +191,7 @@ def search_parser(query_string):
         if match:
             string = LIMIT_RE.sub('', string)
             maxitems = int(match.group(1))
-            # log.debug("limit: %s", maxitems)
+            # print("limit: %s", maxitems)
             continue
 
         # Get wanted order by:
@@ -200,7 +200,7 @@ def search_parser(query_string):
             string = ORDER_BY_RE.sub('', string)
             sort_by = SPLIT_RE.split(match.group(1).strip())
             sort_by_reversed = match.group(2) == 'DESC'
-            # log.debug("order: %s", sort_by)
+            # print("order: %s", sort_by)
             continue
 
         # Get wanted facets:
@@ -208,11 +208,9 @@ def search_parser(query_string):
         if match:
             string = FACETS_RE.sub('', string)
             spies = SPLIT_RE.split(match.group(2).strip())
-            if spies:
-                check_at_least = int(match.group(1))
-            else:
-                check_at_least = 0
-            # log.debug("facets: %s", spies)
+            check_at_least = spies and match.group(1)
+            check_at_least = int(check_at_least) if check_at_least else 0
+            # print("facets: %s", spies)
             continue
 
         # Get partials (for autocomplete):
@@ -220,7 +218,7 @@ def search_parser(query_string):
         if match:
             string = PARTIAL_RE.sub('', string)
             partials.append(match.group(1).strip())
-            # log.debug("partials: %s", partials)
+            # print("partials: %s", partials)
             continue
 
         # Get terms filtering:
@@ -228,7 +226,7 @@ def search_parser(query_string):
         if match:
             string = TERMS_RE.sub('', string)
             terms = match.group(1).strip()
-            # log.debug("terms: %s", terms)
+            # print("terms: %s", terms)
             continue
 
         # Get searchs:
@@ -236,7 +234,7 @@ def search_parser(query_string):
         if match:
             string = SEARCH_RE.sub('', string)
             search = match.group(1).strip()
-            # log.debug("search: %s", search)
+            # print("search: %s", search)
             continue
 
     parsed = (
