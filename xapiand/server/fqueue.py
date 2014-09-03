@@ -9,6 +9,11 @@ import marshal
 import multiprocessing
 from contextlib import contextmanager
 
+try:
+    import cPickle as pickle
+except ImportError:
+    import pickle
+
 import logging
 logger = logging.getLogger(__name__)
 
@@ -183,10 +188,10 @@ class FileQueue(object):
                 # If there's something more to read in the file,
                 # release (or re-release) the semaphore.
                 self.sem.release()
-            return marshal.loads(zlib.decompress(value))
+            return pickle.loads(zlib.decompress(value))
 
     def put(self, value, block=True, timeout=None):
-        value = zlib.compress(marshal.dumps(value))
+        value = zlib.compress(pickle.dumps(value))
         crc32 = zlib.crc32(value)
         with flock(self.fwrite) as fwrite:
             marshal.dump((crc32, value), fwrite)
