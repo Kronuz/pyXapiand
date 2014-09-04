@@ -11,7 +11,6 @@ from .serialise import serialise_value, normalize
 from .utils import parse_url, build_url
 
 KEY_RE = re.compile(r'[_a-zA-Z][_a-zA-Z0-9]*')
-XAPIAN_REMOTE_RE = re.compile('xapian://')
 
 
 def _xapian_subdatabase(databases_pool, db, writable, create, data='.', log=None):
@@ -23,11 +22,9 @@ def _xapian_subdatabase(databases_pool, db, writable, create, data='.', log=None
     except KeyError:
         if scheme == 'file':
             database = _xapian_database_open(databases_pool, path, writable, create, data, log)
-        else:
-            if not port and scheme == 'xapian':
-                port = 33333
+        elif scheme == 'xapian':
             timeout = int(query.get('timeout', 0))
-            database = _xapian_database_connect(databases_pool, hostname, port, timeout, writable, data, log)
+            database = _xapian_database_connect(databases_pool, hostname, port or 33333, timeout, writable, data, log)
         database._url = build_url(*parse)
         databases_pool[(writable, key)] = database
         log.debug("Subdatabase %s: %s", 'created' if create else 'opened', database._url)
