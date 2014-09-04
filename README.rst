@@ -11,7 +11,7 @@ Getting Started
 Installation
 ------------
 
-Install using: `pip install --pre Xapiand`
+Install using: `pip install xapiand`
 
 Start server by running: command ``xapiand`` or ``python -m xapiand``.
 This will start in the console mode ``--detach`` is available as well as
@@ -165,7 +165,7 @@ Remote Databases
 ================
 
 Databases running with the ``xapian-tcpsrv`` can be used by opening them as:
-``USING xapian://hostname.server:33333`` (33333 is the default, so
+``USING xapian://hostname.server:33333`` (``33333`` is the default, so
 ``xapian://hostname.server`` is equivalent).
 
 
@@ -173,7 +173,7 @@ Multiple Databases
 ==================
 
 Clients can connect to multiple endpoints (databases) listing all the endpoints
-as part of the ``USING`` command. types can be mixed: e.g.:
+as part of the ``USING`` command and database types can be mixed: e.g.:
 ``USING xapian://hostname.server:33333 example``
 
 
