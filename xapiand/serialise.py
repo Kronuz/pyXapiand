@@ -35,7 +35,9 @@ def normalize(text):
 def serialise_value(value):
     """
     Utility method that converts Python values to a string for Xapian values.
+
     """
+    values = []
     if isinstance(value, datetime.datetime):
         if value.microsecond:
             value = '%04d%02d%02d%02d%02d%02d%06d' % (
@@ -47,8 +49,10 @@ def serialise_value(value):
                 value.year, value.month, value.day, value.hour,
                 value.minute, value.second
             )
+        values.append(value)
     elif isinstance(value, datetime.date):
         value = '%04d%02d%02d000000' % (value.year, value.month, value.day)
+        values.append(value)
     elif isinstance(value, datetime.time):
         if value.microsecond:
             value = '%02d%02d%02d%06d' % (
@@ -58,19 +62,22 @@ def serialise_value(value):
             value = '%02d%02d%02d' % (
                 value.hour, value.minute, value.second
             )
+        values.append(value)
     elif isinstance(value, bool):
-        if value:
-            value = u't'
-        else:
-            value = u'f'
+        values.append('t' if value else 'f')
     elif isinstance(value, float):
-        value = sortable_serialise(value)
+        values.append(sortable_serialise(value))
     elif isinstance(value, (int, long)):
-        value = u'%012d' % value
-    elif hasattr(value, 'serialise'):
+        values.append('%012d' % value)
+    elif isinstance(value, LatLongCoord):
         value = value.serialise()
+        values.append(value)
+        for term, value in [(value[:-i], 5 - i) if i else (value, 5) for i in range(5)]:
+            values.append(value)
+    elif hasattr(value, 'serialise'):
+        values.append(value.serialise())
     elif value:
-        value = "%s" % value
+        values.append(normalize("%s" % value))
     else:
-        value = ""
-    return value
+        values.append('')
+    return values

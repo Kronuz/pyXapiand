@@ -175,8 +175,9 @@ def xapian_index(databases_pool, db, document, commit=False, data='.', log=None)
         name = name.strip().lower()
         slot = get_slot(name)
         if slot:
-            value = serialise_value(value)
-            document.add_value(slot, value)
+            value = serialise_value(value)[0]
+            if value:
+                document.add_value(slot, value)
         else:
             log.warning("Ignored document value name (%r)", name)
 
@@ -194,11 +195,12 @@ def xapian_index(databases_pool, db, document, commit=False, data='.', log=None)
         weight = 1 if weight is None else weight
         prefix = '' if prefix is None else prefix
 
-        term = normalize(serialise_value(term))
-        if position is None:
-            document.add_term(prefix + term, weight)
-        else:
-            document.add_posting(prefix + term, position, weight)
+        for term in serialise_value(term):
+            if term:
+                if position is None:
+                    document.add_term(prefix + term, weight)
+                else:
+                    document.add_posting(prefix + term, position, weight)
 
     for text in document_texts or ():
         if isinstance(text, (tuple, list)):
