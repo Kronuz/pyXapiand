@@ -184,7 +184,7 @@ class XapianReceiver(CommandReceiver):
             self.sendLine(">> ERR: Unable to get results: %s" % e)
             return
 
-        self.sendLine("# DEBUG: Parsed query was: %r" % search.query)
+        self.sendLine("# DEBUG: Parsed query was: %s" % search.query)
         for warning in search.warnings:
             self.sendLine("# WARNING: %s" % warning)
         size = search.size
