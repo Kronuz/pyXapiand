@@ -529,7 +529,7 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
         PQueue = MemoryQueue
     mode = "with multiple threads and %s commit slots using %s" % (commit_slots, PQueue.__name__)
 
-    log.warning("Starting Xapiand %s [%s] (pid:%s)", mode, loglevel, os.getpid())
+    log.warning("Starting Xapiand %s %s [%s] (pid:%s)", version, mode, loglevel, os.getpid())
 
     commit_lock = threading.Semaphore(commit_slots)
     timeouts = Obj(
@@ -666,4 +666,4 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
     for t, tq in databases.values():
         t.join()
 
-    log.warning("Xapian ended! (pid:%s)", os.getpid())
+    log.warning("Xapiand ended! (pid:%s)", os.getpid())
