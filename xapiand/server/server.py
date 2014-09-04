@@ -47,6 +47,7 @@ QUEUE_WORKER_THREAD = 'Xapian-%s'
 g_tl = threading.local()
 main_queue = queue.Queue()
 queues = {}
+PQueue = None
 
 
 class Obj(object):

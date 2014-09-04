@@ -1,12 +1,11 @@
 from __future__ import unicode_literals, absolute_import
 
 import base64
-from hashlib import md5
 
 import xapian
 
 from . import json
-from .core import xapian_reopen, KEY_RE
+from .core import xapian_reopen, get_slot
 from .parser import search_parser
 from .serialise import normalize
 from .exceptions import XapianError
@@ -128,8 +127,8 @@ class Search(object):
         if self.facets:
             for name in self.facets:
                 name = name.strip().lower()
-                if KEY_RE.match(name):
-                    slot = int(md5(name).hexdigest(), 16) & 0xffffffff
+                slot = get_slot(name)
+                if slot:
                     spy = xapian.ValueCountMatchSpy(slot)
                     enquire.add_matchspy(spy)
                     spies[name] = spy
@@ -148,8 +147,8 @@ class Search(object):
             sorter = xapian.MultiValueKeyMaker()
             for name, reverse in sort_by:
                 name = name.strip().lower()
-                if KEY_RE.match(name):
-                    slot = int(md5(name).hexdigest(), 16) & 0xffffffff
+                slot = get_slot(name)
+                if slot:
                     sorter.add_value(slot, reverse)
                 else:
                     warnings.append("Ignored document value name (%r)" % name)

@@ -13,6 +13,11 @@ from .utils import parse_url, build_url
 KEY_RE = re.compile(r'[_a-zA-Z][_a-zA-Z0-9]*')
 
 
+def get_slot(name):
+    if KEY_RE.match(name):
+        return int(md5(name.lower()).hexdigest(), 16) & 0xffffffff
+
+
 def _xapian_subdatabase(databases_pool, db, writable, create, data='.', log=None):
     parse = parse_url(db)
     scheme, hostname, port, username, password, path, query = parse
@@ -168,8 +173,8 @@ def xapian_index(databases_pool, db, document, commit=False, data='.', log=None)
 
     for name, value in (document_values or {}).items():
         name = name.strip().lower()
-        if KEY_RE.match(name):
-            slot = int(md5(name.lower()).hexdigest(), 16) & 0xffffffff
+        slot = get_slot(name)
+        if slot:
             value = serialise_value(value)
             document.add_value(slot, value)
         else:
