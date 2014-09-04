@@ -22,7 +22,7 @@ class XapianConnection(Connection):
 
     @command
     def create(self, endpoint):
-        response = self._response(self.execute_command('CRETE', endpoint))
+        response = self._response(self.execute_command('CREATE', endpoint))
         self.context.endpoints = [endpoint]
         return response
 
