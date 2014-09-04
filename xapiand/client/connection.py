@@ -1,6 +1,5 @@
 from __future__ import absolute_import, unicode_literals
 
-import six
 import sys
 import time
 import Queue
@@ -10,6 +9,11 @@ import socket
 
 from errno import EISCONN, EINVAL, ECONNREFUSED
 from functools import wraps
+
+try:
+    from cStringIO import StringIO
+except ImportError:
+    from StringIO import StringIO
 
 from ..exceptions import ConnectionError
 
@@ -130,7 +134,7 @@ def with_retry(func):
                 retries += 1
                 delay *= 3      # growing the delay
 
-        six.reraise(*exc_info)
+        raise (exc_info[0], exc_info[1], exc_info[2])
     return _with_retry
 
 
@@ -182,7 +186,7 @@ class Connection(object):
             except socket.error:
                 exc_info = sys.exc_info()
                 e = exc_info[1]
-                six.reraise(
+                raise (
                     ConnectionError,
                     ConnectionError(self._error_message(e)),
                     exc_info[2])
@@ -216,7 +220,7 @@ class Connection(object):
                 retries += 1
                 delay *= 2      # growing the delay
 
-        six.reraise(*exc_info)
+        raise (exc_info[0], exc_info[1], exc_info[2])
 
     def disconnect(self):
         "Disconnects from the server"
@@ -245,7 +249,7 @@ class Connection(object):
                 _errno, errmsg = 'UNKNOWN', e.args[0]
             else:
                 _errno, errmsg = e.args
-            six.reraise(
+            raise (
                 ConnectionError,
                 ConnectionError("Error %s while writing to socket. %s." % (_errno, errmsg)),
                 exc_info[2])
@@ -264,7 +268,7 @@ class Connection(object):
                         # socket can cause MemoryErrors. Read smaller chunks at a
                         # time to work around this.
                         try:
-                            buf = six.BytesIO()
+                            buf = StringIO()
                             while bytes_left > 0:
                                 read_len = min(bytes_left, self.MAX_READ_LENGTH)
                                 buf.write(self._file.read(read_len))
@@ -286,7 +290,7 @@ class Connection(object):
                 self.disconnect()
                 exc_info = sys.exc_info()
                 e = exc_info[1]
-                six.reraise(
+                raise (
                     ConnectionError,
                     ConnectionError("Error while reading from socket: %s" % (e.args,)),
                     exc_info[2])
@@ -317,7 +321,7 @@ class ServerPool(object):
             maxsize=self.max_pool_size,
             wait_for_connection=self.socket_timeout,
         )
-        if isinstance(server, six.string_types):
+        if isinstance(server, basestring):
             self._servers = server.split(';')
         else:
             self._servers = server
@@ -349,7 +353,7 @@ class ServerPool(object):
                         exc_info = sys.exc_info()
                         retries += 1
 
-        six.reraise(*exc_info)
+        raise (exc_info[0], exc_info[1], exc_info[2])
 
     def _pick_server(self):
         # update the blacklist
