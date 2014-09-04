@@ -3,7 +3,7 @@ from __future__ import absolute_import, unicode_literals
 from .. import json
 
 from .. import version
-from ..core import xapian_index, xapian_commit, xapian_delete, xapian_database, xapian_reopen
+from ..core import xapian_index, xapian_commit, xapian_delete, xapian_database
 from ..parser import index_parser
 from ..search import Search
 from ..exceptions import XapianError
@@ -23,27 +23,46 @@ class Xapian(object):
         if not self.endpoints:
             raise XapianError("Select a database with the command USING")
 
+    def _get_database(self, create=False, endpoints=None):
+        endpoints = endpoints or self.endpoints
+        if endpoints:
+            return xapian_database(self.databases_pool, endpoints, False, create, data=self.data, log=self.log)
+
+    def _reopen(self, create=False, endpoints=None):
+        self._get_database(create=create, endpoints=endpoints)
+        self._do_reopen = False
+        self._do_init = True
+
     def version(self):
         return version
 
     def reopen(self):
         self._check_db()
-        xapian_reopen(self.database, data=self.data, log=self.log)
+        self._reopen()
 
     def create(self, endpoint):
-        self.endpoints = (endpoint,)
-        self.database = xapian_database({}, self.endpoints, False, True, data=self.data, log=self.log)
+        endpoint = endpoint.strip()
+        if endpoint:
+            endpoints = (endpoint,)
+            self._reopen(create=True, endpoints=endpoints)
+            self.endpoints = endpoints
+        else:
+            raise XapianError("You must specify a valid endpoint for the database")
 
     def using(self, endpoints=None):
         if endpoints:
             assert isinstance(endpoints, (list, tuple)), "Endpoints must be a tuple"
-            self.endpoints = tuple(endpoints)
-            self.database = xapian_database({}, self.endpoints, False, False, data=self.data, log=self.log)
+            endpoints = tuple(endpoints)
+            self._reopen(create=False, endpoints=endpoints)
+            self.endpoints = endpoints
+        self._check_db()
+    open = using
 
     def _search(self, query, get_matches, get_data, get_terms, get_size):
-        self._check_db()
+        database = self._get_database()
+
         search = Search(
-            self.database,
+            database,
             query,
             get_matches=get_matches,
             get_data=get_data,
@@ -52,24 +71,29 @@ class Xapian(object):
             data=self.data,
             log=self.log,
         )
+
         return search
 
     def facets(self, query):
+        self._check_db()
         search = self._search('* FACETS %s LIMIT 0' % query, get_matches=False, get_data=False, get_terms=False, get_size=False)
         for result in search.results:
             yield json.loads(result)
 
     def terms(self, query):
+        self._check_db()
         search = self._search(query, get_matches=True, get_data=False, get_terms=True, get_size=False)
         for result in search.results:
             yield json.loads(result)
 
     def find(self, query):
+        self._check_db()
         search = self._search(query, get_matches=True, get_data=False, get_terms=False, get_size=False)
         for result in search.results:
             yield json.loads(result)
 
     def search(self, query):
+        self._check_db()
         search = self._search(query, get_matches=True, get_data=True, get_terms=False, get_size=False)
         for result in search.results:
             yield json.loads(result)
@@ -79,7 +103,8 @@ class Xapian(object):
             search = self._search(query, get_matches=False, get_data=False, get_terms=False, get_size=True)
             return search.size
         else:
-            size = self.database.get_doccount()
+            database = self._get_database()
+            size = database.get_doccount()
             return size
 
     def _delete(self, document_id, commit):

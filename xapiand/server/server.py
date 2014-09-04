@@ -61,11 +61,11 @@ class XapianReceiver(CommandReceiver):
     def __init__(self, *args, **kwargs):
         data = kwargs.pop('data', '.')
         super(XapianReceiver, self).__init__(*args, **kwargs)
-        self.data = data
-        self.endpoints = None
-        self.database = None
         self._do_reopen = False
         self._do_init = False
+        self.databases_pool = self.server.databases_pool
+        self.endpoints = None
+        self.data = data
 
     def dispatch(self, func, line):
         if getattr(func, 'db', False) and not self.endpoints:
@@ -74,6 +74,16 @@ class XapianReceiver(CommandReceiver):
         if getattr(func, 'reopen', False) and self._do_reopen:
             self._reopen()
         super(XapianReceiver, self).dispatch(func, line)
+
+    def _get_database(self, create=False, endpoints=None):
+        endpoints = endpoints or self.endpoints
+        if endpoints:
+            return xapian_database(self.databases_pool, endpoints, False, create, data=self.data, log=self.log)
+
+    def _reopen(self, create=False, endpoints=None):
+        self._get_database(create=create, endpoints=endpoints)
+        self._do_reopen = False
+        self._do_init = True
 
     @command
     def version(self, line):
@@ -85,11 +95,6 @@ class XapianReceiver(CommandReceiver):
         """
         self.sendLine(">> OK: %s" % version)
     ver = version
-
-    def _reopen(self, create=False):
-        self.database = xapian_database(self.server.databases_pool, self.endpoints, False, create, data=self.data, log=self.log)
-        self._do_reopen = False
-        self._do_init = True
 
     @command(db=True)
     def reopen(self, line=''):
@@ -106,7 +111,7 @@ class XapianReceiver(CommandReceiver):
             self._reopen()
             self.sendLine(">> OK")
         except InvalidIndexError as e:
-            self.sendLine(">> ERR: %s" % e)
+            self.sendLine(">> ERR: Reopen: %s" % e)
 
     @command
     def create(self, line=''):
@@ -118,12 +123,13 @@ class XapianReceiver(CommandReceiver):
         """
         endpoint = line.strip()
         if endpoint:
-            self.endpoints = (endpoint,)
+            endpoints = (endpoint,)
             try:
-                self._reopen(True)
-                self.sendLine(">> OK")
+                self._reopen(create=True, endpoints=endpoints)
+                self.endpoints = endpoints
             except InvalidIndexError as e:
-                self.sendLine(">> ERR: %s" % e)
+                self.sendLine(">> ERR: Create: %s" % e)
+            self.sendLine(">> OK")
         else:
             self.sendLine(">> ERR: [405] You must specify a valid endpoint for the database")
 
@@ -138,13 +144,14 @@ class XapianReceiver(CommandReceiver):
         Usage: USING <endpoint> [endpoint ...]
 
         """
-        endpoints = tuple(line.split())
+        endpoints = line
         if endpoints:
-            self.endpoints = endpoints
+            endpoints = tuple(endpoints.split())
             try:
-                self._reopen()
+                self._reopen(create=False, endpoints=endpoints)
+                self.endpoints = endpoints
             except InvalidIndexError as e:
-                self.sendLine(">> ERR: %s" % e)
+                self.sendLine(">> ERR: Using: %s" % e)
                 return
         if self.endpoints:
             self.sendLine(">> OK")
@@ -153,8 +160,14 @@ class XapianReceiver(CommandReceiver):
     open = using
 
     def _search(self, line, get_matches, get_data, get_terms, get_size):
+        try:
+            database = self._get_database()
+        except InvalidIndexError as e:
+            self.sendLine(">> ERR: Search: %s" % e)
+            return
+
         search = Search(
-            self.database,
+            database,
             line,
             get_matches=get_matches,
             get_data=get_data,
@@ -220,7 +233,12 @@ class XapianReceiver(CommandReceiver):
         if line:
             self._search(line, get_matches=False, get_data=False, get_terms=False, get_size=True)
         else:
-            size = self.database.get_doccount()
+            try:
+                database = self._get_database()
+            except InvalidIndexError as e:
+                self.sendLine(">> ERR: Count: %s" % e)
+                return
+            size = database.get_doccount()
             self.sendLine(">> OK: %s documents found in %sms" % (size, 1000.00 * (time.time() - start)))
     count.__doc__ = """
     Counts matching documents.
