@@ -5,6 +5,8 @@ except ImportError:
 
 import os
 
+from xapiand import version
+
 
 def read(fname):
     try:
@@ -14,7 +16,7 @@ def read(fname):
 
 setup(
     name='Xapiand',
-    version='2.0.0.dev2',
+    version=version,
     author='German M. Bravo (Kronuz)',
     author_email='german.mb@gmail.com',
     packages=[
@@ -25,8 +27,9 @@ setup(
         'xapiand.management',
         'xapiand.management.commands',
     ],
-    url='http://pypi.python.org/pypi/Xapiand/',
+    url='http://github.com/Kronuz/Xapiand',
     license='LICENSE.txt',
+    keywords='indexing server xapian',
     description="Xapian indexing and querying server implemented in Python",
     long_description=read('README.rst'),
     entry_points={

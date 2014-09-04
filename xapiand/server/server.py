@@ -10,14 +10,6 @@ from hashlib import md5
 import threading
 import multiprocessing
 
-try:
-    from .redis import RedisQueue
-except ImportError:
-    RedisQueue = None
-from .fqueue import FileQueue
-from .memory import MemoryQueue
-PQueue = None
-
 import gevent
 from gevent import queue
 
@@ -30,6 +22,13 @@ from ..parser import index_parser, search_parser
 from ..search import Search
 
 from .base import CommandReceiver, CommandServer, command
+try:
+    from .redis import RedisQueue
+except ImportError:
+    RedisQueue = None
+from .fqueue import FileQueue
+from .memory import MemoryQueue
+
 
 import logging
 colored_logging(logging)

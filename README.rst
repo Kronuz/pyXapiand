@@ -25,25 +25,32 @@ Indexing directly using the xapiand protocol
 
 Connect to server using ``nc localhost 8890`` or ``telent localhost 8890``
 
-Open a database: ``USING example``
+Create (or open) a new database and index a document::
 
-Index a document: ``INDEX {"id": "doc1", "terms": [{"term": "test"}, {"term": "first"}], "data": "DATA"}``
+  CREATE example
 
-Search for a document: ``SEARCH test``
+  INDEX {"id": "doc1", "terms": [{"term": "test"}, {"term": "first"}], "data": "DATA"}
 
-More commands are availabe using: ``HELP`` and ``HELP <command>``.
+Search for a document::
+
+  SEARCH test
+
+More commands are availabe using: ``HELP`` and ``HELP <command>``. To open an
+already existen database, use the ``USING`` command instead of ``CREATE``.
 
 
 Indexing from the Python client
 -------------------------------
 
-Import client: ``from xapiand import Xapian``
+Connect and create a new database::
 
-Connect: ``x = Xapian('localhost:8890')``
-
-Create a new database: ``x.create('example')``
+  from xapiand import Xapian
+  x = Xapian('localhost:8890')
+  x.create('example')  # or x.using('example') if it already exists
 
 Index a couple documents::
+
+  import datetime
 
   x.index({
     "id": "doc2",
@@ -68,7 +75,10 @@ Index a couple documents::
   })
 
 
-Search for a document: ``list(x.search('test'))``
+Search for a document::
+
+  for result in x.search('test'):
+    print result
 
 
 Indexing
@@ -132,8 +142,10 @@ PARTIAL
 Partial is used to find documents in the way needed for autocomplete-like
 searches. If multiple PARTIAL keywords are given, it finds documents containing
 the first one AND MAYBE the second ones. For example, to find documents that
-contain (``spider`` AND ``arac*``) AND MAYBE (``america``), you'd do something like:
-``SEARCH PARTIAL spider arac PARTIAL america``
+contain (``spider`` AND ``arac*``) AND MAYBE (``america``), you'd do something
+like::
+
+  SEARCH PARTIAL spider arac PARTIAL america
 
 
 TERMS
