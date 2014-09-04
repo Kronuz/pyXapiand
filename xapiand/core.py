@@ -1,5 +1,6 @@
 from __future__ import absolute_import, unicode_literals
 
+import os
 import re
 from hashlib import md5
 
@@ -22,9 +23,8 @@ def _xapian_subdatabase(databases_pool, db, writable, create, data='.', log=None
         if scheme == 'file':
             database = _xapian_database_open(databases_pool, path, writable, create, data, log)
         else:
-            if not port:
-                if scheme == 'xapian':
-                    port = 33333
+            if not port and scheme == 'xapian':
+                port = 33333
             timeout = int(query.get('timeout', 0))
             database = _xapian_database_connect(databases_pool, hostname, port, timeout, writable, data, log)
         databases_pool[(writable, key)] = database
@@ -34,6 +34,13 @@ def _xapian_subdatabase(databases_pool, db, writable, create, data='.', log=None
 
 def _xapian_database_open(databases_pool, path, writable, create, data='.', log=None):
     try:
+        if create:
+            try:
+                directory = os.path.dirname(path)
+                if directory and not os.path.isdir(directory):
+                    os.makedirs(directory, 0700)
+            except OSError:
+                pass
         if writable:
             database = xapian.WritableDatabase(path, xapian.DB_CREATE_OR_OPEN if create else xapian.DB_OPEN)
         else:
