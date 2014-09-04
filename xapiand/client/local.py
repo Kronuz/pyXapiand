@@ -134,12 +134,14 @@ class Xapian(object):
         self._delete(id, True)
 
     def _index(self, obj, commit):
-        self._check_db()
         result = index_parser(obj)
         if not isinstance(result, tuple):
             return result
         endpoints, document = result
-        for db in endpoints or self.endpoints:
+        endpoints = endpoints or self.endpoints
+        if not endpoints:
+            self._check_db()
+        for db in endpoints:
             xapian_index(self.databases_pool, db, document, commit=commit, data=self.data, log=self.log)
 
     def index(self, obj=None, **kwargs):

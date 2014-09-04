@@ -289,13 +289,17 @@ class XapianReceiver(CommandReceiver):
         result = index_parser(line)
         if isinstance(result, tuple):
             endpoints, document = result
-            for db in endpoints or self.endpoints:
+            endpoints = endpoints or self.endpoints
+            if not endpoints:
+                self.sendLine(">> ERR: %s" % "You must connect to a database first")
+                return
+            for db in endpoints:
                 _xapian_index(db, document, commit=commit, data=self.data, log=self.log)
             self.sendLine(">> OK")
         else:
             self.sendLine(result)
 
-    @command(db=True)
+    @command
     def index(self, line):
         self._index(line, False)
     index.__doc__ = """
@@ -304,7 +308,7 @@ class XapianReceiver(CommandReceiver):
     Usage: INDEX <json>
     """ + index_parser.__doc__
 
-    @command(db=True)
+    @command
     def cindex(self, line):
         self._index(line, True)
     cindex.__doc__ = """
