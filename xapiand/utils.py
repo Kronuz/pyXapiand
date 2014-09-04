@@ -2,10 +2,12 @@ from __future__ import unicode_literals, absolute_import
 
 import re
 import datetime
+
 try:
     from dateutil.tz import tzoffset
 except ImportError:
     tzoffset = None
+
 try:
     from urllib.parse import unquote, urlparse, parse_qsl
 except ImportError:
