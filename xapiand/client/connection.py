@@ -134,7 +134,7 @@ def with_retry(func):
                 retries += 1
                 delay *= 3      # growing the delay
 
-        raise (exc_info[0], exc_info[1], exc_info[2])
+        raise exc_info[0], exc_info[1], exc_info[2]
     return _with_retry
 
 
@@ -220,7 +220,7 @@ class Connection(object):
                 retries += 1
                 delay *= 2      # growing the delay
 
-        raise (exc_info[0], exc_info[1], exc_info[2])
+        raise exc_info[0], exc_info[1], exc_info[2]
 
     def disconnect(self):
         "Disconnects from the server"
@@ -349,11 +349,11 @@ class ServerPool(object):
                 else:
                     try:
                         return func(*args, **kwargs)
-                    except Exception:
+                    except (IOError, RuntimeError, socket.error, ConnectionError):
                         exc_info = sys.exc_info()
                         retries += 1
 
-        raise (exc_info[0], exc_info[1], exc_info[2])
+        raise exc_info[0], exc_info[1], exc_info[2]
 
     def _pick_server(self):
         # update the blacklist
