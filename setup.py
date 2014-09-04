@@ -29,6 +29,11 @@ setup(
     license='LICENSE.txt',
     description="Xapian indexing and querying server implemented in Python",
     long_description=read('README.rst'),
+    entry_points={
+        'console_scripts': [
+            'xapiand = xapiand.__main__:main',
+        ]
+    },
     install_requires=[
         "gevent",
     ],
