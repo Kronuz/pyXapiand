@@ -9,6 +9,7 @@ from . import json
 from .core import xapian_reopen, KEY_RE
 from .parser import search_parser
 from .serialise import normalize
+from .exceptions import XapianError
 
 
 class Search(object):
@@ -154,9 +155,12 @@ class Search(object):
 
         try:
             matches = self.enquire.get_mset(self.first, self.maxitems, self.check_at_least)
-        except xapian.DatabaseModifiedError:
+        except (xapian.NetworkError, xapian.DatabaseModifiedError):
             xapian_reopen(self.database, data=self.data, log=self.log)
-            matches = self.enquire.get_mset(self.first, self.maxitems, self.check_at_least)
+            try:
+                matches = self.enquire.get_mset(self.first, self.maxitems, self.check_at_least)
+            except xapian.NetworkError as e:
+                raise XapianError(e)
 
         if self.get_size:
             self.size = matches.size()
@@ -182,9 +186,12 @@ class Search(object):
             if self.get_data:
                 try:
                     data = match.document.get_data()
-                except xapian.DatabaseModifiedError:
+                except (xapian.NetworkError, xapian.DatabaseModifiedError):
                     xapian_reopen(self.database, data=self.data, log=self.log)
-                    data = match.document.get_data()
+                    try:
+                        data = match.document.get_data()
+                    except xapian.NetworkError as e:
+                        raise XapianError(e)
                 try:
                     data = json.loads(data)
                 except:

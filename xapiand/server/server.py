@@ -22,7 +22,7 @@ import gevent
 from gevent import queue
 
 from .. import version
-from ..exceptions import InvalidIndexError
+from ..exceptions import InvalidIndexError, XapianError
 from ..core import xapian_database, xapian_commit, xapian_index, xapian_delete
 from ..platforms import create_pidlock
 from ..utils import colored_logging
@@ -165,8 +165,12 @@ class XapianReceiver(CommandReceiver):
         )
 
         start = time.time()
-        for line in search.results:
-            self.sendLine(line)
+        try:
+            for line in search.results:
+                self.sendLine(line)
+        except XapianError as e:
+            self.sendLine(">> ERR: Unable to get results: %s" % e)
+            return
 
         self.sendLine("# DEBUG: Parsed query was: %r" % search.query)
         for warning in search.warnings:
