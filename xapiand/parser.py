@@ -83,7 +83,7 @@ def index_parser(document):
     default_positions = bool(document.pop('positions', False))
 
     try:
-        endpoints = document['endpoints']
+        endpoints = document.pop('endpoints')
         if not isinstance(endpoints, list):
             return ">> ERR: [400] 'endpoints' must be a list"
     except KeyError:
