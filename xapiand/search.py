@@ -22,7 +22,6 @@ class Search(object):
         self.get_data = get_data
         self.get_size = get_size
         self.size = None
-        self.database = database
 
         doccount = database.get_doccount()
 
@@ -31,7 +30,7 @@ class Search(object):
         qp.set_database(database)
 
         parsed = search_parser(query_string)
-        first, maxitems, sort_by, sort_by_reversed, spies, check_at_least, partials, terms, search = parsed
+        first, maxitems, sort_by, sort_by_reversed, facets, check_at_least, partials, terms, search = parsed
 
         maxitems = max(min(maxitems, doccount - first, 10000), 0)
         check_at_least = max(min(check_at_least, doccount, 10000), 0)
@@ -47,8 +46,9 @@ class Search(object):
                 search = normalize(search)
                 try:
                     query = qp.parse_query(search)
-                except xapian.DatabaseModifiedError:
-                    xapian_reopen(database, data=self.data, log=self.log)
+                except (xapian.NetworkError, xapian.DatabaseModifiedError):
+                    database = xapian_reopen(database, data=self.data, log=self.log)
+                    qp.set_database(database)
                     query = qp.parse_query(search)
 
         if partials:
@@ -59,8 +59,9 @@ class Search(object):
                 flags = xapian.QueryParser.FLAG_WILDCARD | xapian.QueryParser.FLAG_PARTIAL
                 try:
                     _partials_query = qp.parse_query(partial, flags)
-                except xapian.DatabaseModifiedError:
-                    xapian_reopen(database, data=self.data, log=self.log)
+                except (xapian.NetworkError, xapian.DatabaseModifiedError):
+                    database = xapian_reopen(database, data=self.data, log=self.log)
+                    qp.set_database(database)
                     _partials_query = qp.parse_query(partial, flags)
                 if partials_query:
                     partials_query = xapian.Query(
@@ -84,8 +85,9 @@ class Search(object):
             terms = normalize(terms)
             try:
                 terms_query = qp.parse_query(terms, xapian.QueryParser.FLAG_BOOLEAN)
-            except xapian.DatabaseModifiedError:
-                xapian_reopen(database, data=self.data, log=self.log)
+            except (xapian.NetworkError, xapian.DatabaseModifiedError):
+                database = xapian_reopen(database, data=self.data, log=self.log)
+                qp.set_database(database)
                 terms_query = qp.parse_query(terms, xapian.QueryParser.FLAG_BOOLEAN)
             if query:
                 query = xapian.Query(
@@ -102,31 +104,40 @@ class Search(object):
             else:
                 query = xapian.Query()
 
-        self.query = str(query)
+        self.database = database
+        self.query = query
+        self.facets = facets
+        self.check_at_least = check_at_least
+        self.maxitems = maxitems
+        self.first = first
+        self.sort_by = sort_by
+        self.sort_by_reversed = sort_by_reversed
 
-        self.enquire = xapian.Enquire(database)
+    def get_enquire(self, database):
+        enquire = xapian.Enquire(self.database)
         # enquire.set_weighting_scheme(xapian.BoolWeight())
         # enquire.set_docid_order(xapian.Enquire.DONT_CARE)
         # if weighting_scheme:
         #     enquire.set_weighting_scheme(xapian.BM25Weight(*self.weighting_scheme))
-        self.enquire.set_query(query)
+        enquire.set_query(self.query)
 
-        self.warnings = []
-        if spies:
-            _spies, spies = spies, {}
-            for name in _spies:
+        spies = {}
+        sort_by = []
+        warnings = []
+
+        if self.facets:
+            for name in self.facets:
                 name = name.strip().lower()
                 if KEY_RE.match(name):
                     slot = int(md5(name).hexdigest(), 16) & 0xffffffff
                     spy = xapian.ValueCountMatchSpy(slot)
-                    self.enquire.add_matchspy(spy)
+                    enquire.add_matchspy(spy)
                     spies[name] = spy
                 else:
-                    self.warnings.append("Ignored document value name (%r)" % name)
+                    warnings.append("Ignored document value name (%r)" % name)
 
-        if sort_by:
-            _sort_by, sort_by = sort_by, []
-            for sort_field in _sort_by:
+        if self.sort_by:
+            for sort_field in self.sort_by:
                 if sort_field.startswith('-'):
                     reverse = True
                     sort_field = sort_field[1:]  # Strip the '-'
@@ -141,25 +152,27 @@ class Search(object):
                     slot = int(md5(name).hexdigest(), 16) & 0xffffffff
                     sorter.add_value(slot, reverse)
                 else:
-                    self.warnings.append("Ignored document value name (%r)" % name)
-            self.enquire.set_sort_by_key_then_relevance(sorter, sort_by_reversed)
+                    warnings.append("Ignored document value name (%r)" % name)
+            enquire.set_sort_by_key_then_relevance(sorter, self.sort_by_reversed)
 
-        self.first = first
-        self.maxitems = maxitems
-        self.check_at_least = check_at_least
         self.spies = spies
+        self.warnings = warnings
+
+        return enquire
 
     def get_results(self):
         if not self.get_matches:
             self.maxitems = 0
 
         try:
-            matches = self.enquire.get_mset(self.first, self.maxitems, self.check_at_least)
+            enquire = self.get_enquire(self.database)
+            matches = enquire.get_mset(self.first, self.maxitems, self.check_at_least)
         except (xapian.NetworkError, xapian.DatabaseModifiedError):
-            xapian_reopen(self.database, data=self.data, log=self.log)
+            self.database = xapian_reopen(self.database, data=self.data, log=self.log)
             try:
+                enquire = self.get_enquire(self.database)
                 matches = self.enquire.get_mset(self.first, self.maxitems, self.check_at_least)
-            except xapian.NetworkError as e:
+            except (xapian.NetworkError, xapian.DatabaseError) as e:
                 raise XapianError(e)
 
         if self.get_size:
@@ -187,7 +200,7 @@ class Search(object):
                 try:
                     data = match.document.get_data()
                 except (xapian.NetworkError, xapian.DatabaseModifiedError):
-                    xapian_reopen(self.database, data=self.data, log=self.log)
+                    self.database = xapian_reopen(self.database, data=self.data, log=self.log)
                     try:
                         data = match.document.get_data()
                     except xapian.NetworkError as e:

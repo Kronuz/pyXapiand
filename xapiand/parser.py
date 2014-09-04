@@ -170,7 +170,7 @@ def search_parser(query_string):
     sort_by = None
     sort_by_reversed = None
     search = None
-    spies = None
+    facets = None
     terms = None
 
     query_string = 'SEARCH %s' % query_string
@@ -207,13 +207,13 @@ def search_parser(query_string):
         match = FACETS_RE.search(string)
         if match:
             string = FACETS_RE.sub('', string)
-            spies = SPLIT_RE.split(match.group(2).strip())
-            if spies:
+            facets = SPLIT_RE.split(match.group(2).strip())
+            if facets:
                 if match.group(1):
                     check_at_least = max(min(int(match.group(1)), check_at_least), 0)
             else:
                 check_at_least = 0
-            # print "facets:", spies
+            # print "facets:", facets
             continue
 
         # Get partials (for autocomplete):
@@ -245,7 +245,7 @@ def search_parser(query_string):
         maxitems,
         sort_by,
         sort_by_reversed,
-        spies,
+        facets,
         check_at_least,
         partials,
         terms,
