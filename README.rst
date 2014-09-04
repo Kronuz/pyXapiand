@@ -4,15 +4,21 @@ Xapiand
 
 Xapian indexing and querying server implemented in Python.
 
-Start server by running: ``python xapiand/bin/worker.py``. this will start in
-the console mode ``--detach`` is available as well as other common parameters.
-See more information using ``--help``.
-
-The server runs running on port 8890 by default.
-
 
 Getting Started
 ===============
+
+Installation
+------------
+
+Install using: `pip install Xapiand`
+
+Start server by running: command ``xapiand`` or ``python -m xapiand``.
+This will start in the console mode ``--detach`` is available as well as
+other common parameters. See more information using ``--help``.
+
+The server starts and runs on port 8890 by default.
+
 
 Indexing directly using the xapiand protocol
 --------------------------------------------
