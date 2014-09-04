@@ -43,6 +43,17 @@ def parse_url(url):
             dict(parse_qsl(parts.query)))
 
 
+def build_url(scheme, hostname, port, username, password, path, query):
+    return ''.join((
+        "%s://" % scheme if scheme else '',
+        username or '',
+        ":%s" % password if hostname and username and password else '',
+        "@%s" % hostname if hostname and (username or password) else hostname or '',
+        ":%s" % port if port else '',
+        "/%s" % path if path and hostname else path or '',
+    ))
+
+
 def colored_logging(logging):
     """
     Colored logging.

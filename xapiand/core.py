@@ -8,14 +8,15 @@ import xapian
 
 from .exceptions import InvalidIndexError
 from .serialise import serialise_value, normalize
-from .utils import parse_url
+from .utils import parse_url, build_url
 
 KEY_RE = re.compile(r'[_a-zA-Z][_a-zA-Z0-9]*')
 XAPIAN_REMOTE_RE = re.compile('xapian://')
 
 
 def _xapian_subdatabase(databases_pool, db, writable, create, data='.', log=None):
-    scheme, hostname, port, username, password, path, query = parse_url(db)
+    parse = parse_url(db)
+    scheme, hostname, port, username, password, path, query = parse
     key = (scheme, hostname, port, username, password, path)
     try:
         return databases_pool[(writable, key)], False
@@ -27,8 +28,9 @@ def _xapian_subdatabase(databases_pool, db, writable, create, data='.', log=None
                 port = 33333
             timeout = int(query.get('timeout', 0))
             database = _xapian_database_connect(databases_pool, hostname, port, timeout, writable, data, log)
+        database._url = build_url(*parse)
         databases_pool[(writable, key)] = database
-        log.debug("Subdatabase %s! %s id:%s", 'created' if create else 'opened', db, id(database))
+        log.debug("Subdatabase %s: %s", 'created' if create else 'opened', database._url)
         return database, True
 
 
@@ -94,8 +96,9 @@ def _xapian_database(databases_pool, endpoints, writable, create, data='.', log=
                 database._all_databases_config[subdatabase_number] = (db, writable, create)
                 if _database:
                     database.add_database(_database)
+        database._url = ' '.join(d._url for d in database._all_databases if d)
         databases_pool[(writable, endpoints)] = database
-        log.debug("Database %s! id:%s (%s)", 'created' if create else 'opened', id(database), ', '.join("%s" % (id(d) if d else d) for d in database._all_databases))
+        log.debug("Databases %s: %s", 'created' if create else 'opened', database._url)
         return database, True
 
 
