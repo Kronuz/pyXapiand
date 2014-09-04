@@ -1,7 +1,11 @@
 from __future__ import unicode_literals, absolute_import
 
 import re
-
+import datetime
+try:
+    from dateutil.tz import tzoffset
+except ImportError:
+    tzoffset = None
 try:
     from urllib.parse import unquote, urlparse, parse_qsl
 except ImportError:
@@ -52,6 +56,68 @@ def build_url(scheme, hostname, port, username, password, path, query):
         ":%s" % port if port else '',
         "/%s" % path if path and hostname else path or '',
     ))
+
+
+if not tzoffset:
+    ZERO = datetime.timedelta(0)
+
+    class tzoffset(datetime.tzinfo):
+        def __init__(self, name, offset):
+            self._name = name
+            self._offset = datetime.timedelta(seconds=offset)
+
+        def utcoffset(self, dt):
+            return self._offset
+
+        def dst(self, dt):
+            return ZERO
+
+        def tzname(self, dt):
+            return self._name
+
+        def __eq__(self, other):
+            return (isinstance(other, tzoffset) and
+                    self._offset == other._offset)
+
+        def __ne__(self, other):
+            return not self.__eq__(other)
+
+        def __repr__(self):
+            return "%s(%s, %s)" % (self.__class__.__name__,
+                                   repr(self._name),
+                                   self._offset.days * 86400 + self._offset.seconds)
+
+
+def isoparse(ds):
+    try:
+        dt = datetime.datetime.strptime(ds[:26].replace(' ', 'T'), '%Y-%m-%dT%H:%M:%S.%f')
+        try:
+            offset = ds[26:].replace(':', '')
+            delta = datetime.timedelta(hours=int(offset[:-2]), minutes=int(offset[-2:]))
+            dt = dt.replace(tzinfo=tzoffset(None, int(delta.total_seconds())))
+        except:
+            pass
+    except:
+        try:
+            dt = datetime.datetime.strptime(ds[:19].replace(' ', 'T'), '%Y-%m-%dT%H:%M:%S')
+            try:
+                offset = ds[19:].replace(':', '')
+                delta = datetime.timedelta(hours=int(offset[:-2]), minutes=int(offset[-2:]))
+                dt = dt.replace(tzinfo=tzoffset(None, int(delta.total_seconds())))
+            except:
+                pass
+        except:
+            try:
+                dt = datetime.datetime.strptime(ds[:15], '%H:%M:%S.%f')
+            except:
+                try:
+                    dt = datetime.datetime.strptime(ds[:8], '%H:%M:%S')
+                except:
+                    try:
+                        dt = datetime.datetime.strptime(ds[:8], '%H:%M')
+                    except:
+                        dt = datetime.datetime.strptime(ds[:10], '%Y-%m-%d')
+    return dt
 
 
 def colored_logging(logging):

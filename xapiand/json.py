@@ -14,7 +14,6 @@ import codecs
 import datetime
 import decimal
 import uuid
-import dateutil.parser
 
 try:
     import simplejson as json
@@ -22,6 +21,7 @@ except ImportError:
     import json
 
 from .serialise import LatLongCoord
+from .utils import isoparse
 
 try:
     JSONDecodeError = json.JSONDecodeError
@@ -64,9 +64,9 @@ class XapianJSONEncoder(json.JSONEncoder):
 
 DECODER_BY_RE = (
     (re.compile(r'[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$'), uuid.UUID),
-    (re.compile(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}'), dateutil.parser.parse),
-    (re.compile(r'\d{4}-\d{2}-\d{2}$'), lambda o: dateutil.parser.parse(o).date()),
-    (re.compile(r'\d{2}:\d{2}:\d{2}$'), lambda o: dateutil.parser.parse(o).time()),
+    (re.compile(r'\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d{6})?([-+]\d{2}:?\d{2})?$'), isoparse),
+    (re.compile(r'\d{4}-\d{2}-\d{2}$'), lambda o: isoparse(o).date()),
+    (re.compile(r'\d{2}:\d{2}(:\d{2}(\.\d{6})?)?$'), lambda o: isoparse(o).time()),
     (re.compile(r'\([-+]?(\d+|\d*.\d+),\s*[-+]?(\d+|\d*.\d+)\)$'), lambda o: LatLongCoord(*eval(o))),
 )
 
