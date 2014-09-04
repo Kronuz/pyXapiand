@@ -58,7 +58,22 @@ class Xapian(object):
         self._check_db()
     open = using
 
-    def _search(self, query, get_matches, get_data, get_terms, get_size):
+    def _search(self, query, get_matches, get_data, get_terms, get_size, facets=None, terms=None, partial=None, search=None, offset=None, limit=None, order_by=None):
+        if facets:
+            query += ' FACETS %s' % ' '.join(facets)
+        if terms:
+            query += ' TERMS %s' % ' '.join(terms)
+        if partial:
+            query += ' PARTIAL %s' % ' PARTIAL '.join(partial)
+        if search:
+            query += ' SEARCH %s' % ' '.join(search)
+        if offset:
+            query += ' OFFSET %d' % offset
+        if limit:
+            query += ' LIMIT %d' % limit
+        if order_by:
+            query += ' ORDER BY %s' % ' '.join(order_by)
+
         database = self._get_database()
 
         search = Search(
@@ -74,31 +89,31 @@ class Xapian(object):
 
         return search
 
-    def facets(self, query):
+    def facets(self, query=''):
         self._check_db()
         search = self._search('* FACETS %s LIMIT 0' % query, get_matches=False, get_data=False, get_terms=False, get_size=False)
         for result in search.results:
             yield json.loads(result)
 
-    def terms(self, query):
+    def terms(self, query='', partial=None, search=None, offset=None, limit=None, order_by=None):
         self._check_db()
-        search = self._search(query, get_matches=True, get_data=False, get_terms=True, get_size=False)
+        search = self._search(query, get_matches=True, get_data=False, get_terms=True, get_size=False, partial=partial, search=search, offset=offset, limit=limit, order_by=order_by)
         for result in search.results:
             yield json.loads(result)
 
-    def find(self, query):
+    def find(self, query='', facets=None, terms=None, partial=None, search=None, offset=None, limit=None, order_by=None):
         self._check_db()
-        search = self._search(query, get_matches=True, get_data=False, get_terms=False, get_size=False)
+        search = self._search(query, get_matches=True, get_data=False, get_terms=False, get_size=False, facets=facets, terms=terms, partial=partial, search=search, offset=offset, limit=limit, order_by=order_by)
         for result in search.results:
             yield json.loads(result)
 
-    def search(self, query):
+    def search(self, query='', facets=None, terms=None, partial=None, search=None, offset=None, limit=None, order_by=None):
         self._check_db()
-        search = self._search(query, get_matches=True, get_data=True, get_terms=False, get_size=False)
+        search = self._search(query, get_matches=True, get_data=True, get_terms=False, get_size=False, facets=facets, terms=terms, partial=partial, search=search, offset=offset, limit=limit, order_by=order_by)
         for result in search.results:
             yield json.loads(result)
 
-    def count(self, query):
+    def count(self, query=''):
         if query:
             search = self._search(query, get_matches=False, get_data=False, get_terms=False, get_size=True)
             return search.size
@@ -107,16 +122,16 @@ class Xapian(object):
             size = database.get_doccount()
             return size
 
-    def _delete(self, document_id, commit):
+    def _delete(self, id, commit):
         self._check_db()
         for db in self.endpoints:
             xapian_delete(self.databases_pool, db, commit=commit, data=self.data, log=self.log)
 
-    def delete(self, obj):
-        self._delete(obj, False)
+    def delete(self, id):
+        self._delete(id, False)
 
-    def cdelete(self, obj):
-        self._delete(obj, True)
+    def cdelete(self, id):
+        self._delete(id, True)
 
     def _index(self, obj, commit):
         self._check_db()
@@ -127,11 +142,12 @@ class Xapian(object):
         for db in endpoints or self.endpoints:
             xapian_index(self.databases_pool, db, document, commit=commit, data=self.data, log=self.log)
 
-    def index(self, obj):
-        self._index(obj, False)
+    def index(self, obj=None, **kwargs):
+        self._index(obj or kwargs, False)
 
-    def cindex(self, obj):
-        self._index(obj, True)
+    def cindex(self, obj=None, **kwargs):
+        obj = obj or kwargs
+        self._index(obj or kwargs, True)
 
     def commit(self):
         self._check_db()

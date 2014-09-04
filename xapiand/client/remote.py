@@ -44,7 +44,22 @@ class XapianConnection(Connection):
             if line.startswith(">> ERR"):
                 raise XapianError(line[8:])
 
-    def _search(self, cmd, query):
+    def _search(self, cmd, query, facets=None, terms=None, partial=None, search=None, offset=None, limit=None, order_by=None):
+        if facets:
+            query += ' FACETS %s' % ' '.join(facets)
+        if terms:
+            query += ' TERMS %s' % ' '.join(terms)
+        if partial:
+            query += ' PARTIAL %s' % ' PARTIAL '.join(partial)
+        if search:
+            query += ' SEARCH %s' % ' '.join(search)
+        if offset:
+            query += ' OFFSET %d' % offset
+        if limit:
+            query += ' LIMIT %d' % limit
+        if order_by:
+            query += ' ORDER BY %s' % ' '.join(order_by)
+
         line = self.execute_command(cmd, query)
         while line:
             response = self._response(line)
@@ -54,23 +69,23 @@ class XapianConnection(Connection):
             line = self.read()
 
     @command
-    def facets(self, query):
-        for r in self._search('FACETS', query):
+    def facets(self, query='', partial=None, terms=None, search=None):
+        for r in self._search('FACETS', query, partial=partial, terms=terms, search=search):
             yield r
 
     @command
-    def terms(self, query):
-        for r in self._search('TERMS', query):
+    def terms(self, query='', partial=None, search=None, offset=None, limit=None, order_by=None):
+        for r in self._search('TERMS', query, partial=partial, search=search, offset=offset, limit=limit, order_by=order_by):
             yield r
 
     @command
-    def find(self, query):
-        for r in self._search('FIND', query):
+    def find(self, query='', facets=None, terms=None, partial=None, search=None, offset=None, limit=None, order_by=None):
+        for r in self._search('FIND', query, facets=facets, terms=terms, partial=partial, search=search, offset=offset, limit=limit, order_by=order_by):
             yield r
 
     @command
-    def search(self, query):
-        for r in self._search('SEARCH', query):
+    def search(self, query='', facets=None, terms=None, partial=None, search=None, offset=None, limit=None, order_by=None):
+        for r in self._search('SEARCH', query, facets=facets, terms=terms, partial=partial, search=search, offset=offset, limit=limit, order_by=order_by):
             yield r
 
     @command
@@ -79,20 +94,20 @@ class XapianConnection(Connection):
         return int(response.split()[0])
 
     @command
-    def delete(self, document_id):
-        return self._response(self.execute_command('DELETE', document_id))
+    def delete(self, id):
+        return self._response(self.execute_command('DELETE', id))
 
     @command
-    def cdelete(self, document_id):
-        return self._response(self.execute_command('CDELETE', document_id))
+    def cdelete(self, id):
+        return self._response(self.execute_command('CDELETE', id))
 
     @command
-    def index(self, obj):
-        return self._response(self.execute_command('INDEX', json.dumps(obj, ensure_ascii=False)))
+    def index(self, obj=None, **kwargs):
+        return self._response(self.execute_command('INDEX', json.dumps(obj or kwargs, ensure_ascii=False)))
 
     @command
-    def cindex(self, obj):
-        return self._response(self.execute_command('CINDEX', json.dumps(obj, ensure_ascii=False)))
+    def cindex(self, obj=None, **kwargs):
+        return self._response(self.execute_command('CINDEX', json.dumps(obj or kwargs, ensure_ascii=False)))
 
     @command
     def commit(self):
