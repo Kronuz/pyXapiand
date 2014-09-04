@@ -14,7 +14,7 @@ def read(fname):
 
 setup(
     name='Xapiand',
-    version='2.0b',
+    version='2.0.0.dev2',
     author='German M. Bravo (Kronuz)',
     author_email='german.mb@gmail.com',
     packages=[

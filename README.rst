@@ -11,7 +11,7 @@ Getting Started
 Installation
 ------------
 
-Install using: `pip install Xapiand`
+Install using: `pip install --pre Xapiand`
 
 Start server by running: command ``xapiand`` or ``python -m xapiand``.
 This will start in the console mode ``--detach`` is available as well as
