@@ -46,10 +46,11 @@ def parse_url(url):
             unquote(parts.username or '') or None,
             unquote(parts.password or '') or None,
             normalize_path(path) or None,
+            parts.query,
             dict(parse_qsl(parts.query)))
 
 
-def build_url(scheme, hostname, port, username, password, path, query):
+def build_url(scheme, hostname, port, username, password, path, query, query_dict):
     return ''.join((
         "%s://" % scheme if scheme else '',
         username or '',
@@ -57,6 +58,7 @@ def build_url(scheme, hostname, port, username, password, path, query):
         "@%s" % hostname if hostname and (username or password) else hostname or '',
         ":%s" % port if port else '',
         "/%s" % path if path and hostname else path or '',
+        "?%s" % query if query and hostname else '',
     ))
 
 

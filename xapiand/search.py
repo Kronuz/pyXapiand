@@ -6,36 +6,30 @@ import xapian
 
 from . import json
 from .core import xapian_reopen, get_slot
-from .parser import search_parser
 from .serialise import normalize
 from .exceptions import XapianError
 
 
 class Search(object):
-    def __init__(self, database, query_string, get_matches=True, get_data=True, get_terms=False, get_size=False, data='.', log=None):
+    def __init__(self, database, obj,
+                 get_matches=True, get_data=True, get_terms=False, get_size=False,
+                 data='.', log=None):
         self.log = log
         self.data = data
-        self.query_string = query_string
         self.get_matches = get_matches
         self.get_terms = get_terms
         self.get_data = get_data
         self.get_size = get_size
         self.size = None
 
-        doccount = database.get_doccount()
-
         # SEARCH
         qp = xapian.QueryParser()
         qp.set_database(database)
 
-        parsed = search_parser(query_string)
-        first, maxitems, sort_by, sort_by_reversed, facets, check_at_least, partials, terms, search = parsed
-
-        maxitems = max(min(maxitems, doccount - first, 10000), 0)
-        check_at_least = max(min(check_at_least, doccount, 10000), 0)
+        query = None
 
         # Build final query:
-        query = None
+        search = obj.get('search')
         if search and search != '*':
             try:
                 query = xapian.Query.unserialise(search)
@@ -50,6 +44,7 @@ class Search(object):
                     qp.set_database(database)
                     query = qp.parse_query(search)
 
+        partials = obj.get('partials')
         if partials:
             # Partials (for autocomplete) using FLAG_PARTIAL and OP_AND_MAYBE
             partials_query = None
@@ -79,6 +74,7 @@ class Search(object):
             else:
                 query = partials_query
 
+        terms = obj.get('terms')
         if terms:
             # Partials (for autocomplete) using FLAG_BOOLEAN and OP_AND
             terms = normalize(terms)
@@ -105,12 +101,12 @@ class Search(object):
 
         self.database = database
         self.query = query
-        self.facets = facets
-        self.check_at_least = check_at_least
-        self.maxitems = maxitems
-        self.first = first
-        self.sort_by = sort_by
-        self.sort_by_reversed = sort_by_reversed
+        self.facets = obj.get('facets')
+        self.check_at_least = obj.get('check_at_least')
+        self.maxitems = obj.get('maxitems')
+        self.first = obj.get('first')
+        self.sort_by = obj.get('sort_by')
+        self.sort_by_reversed = obj.get('sort_by_reversed')
 
     def get_enquire(self, database):
         enquire = xapian.Enquire(self.database)
@@ -160,31 +156,45 @@ class Search(object):
         return enquire
 
     def get_results(self):
+        try:
+            doccount = self.database.get_doccount()
+        except (xapian.NetworkError, xapian.DatabaseModifiedError):
+            self.database = xapian_reopen(self.database, data=self.data, log=self.log)
+            doccount = self.database.get_doccount()
+
+        maxitems = max(min(self.maxitems, doccount - self.first, 10000), 0)
+        check_at_least = max(min(self.check_at_least, doccount, 10000), 0)
+
         if not self.get_matches:
-            self.maxitems = 0
+            maxitems = 0
 
         try:
             enquire = self.get_enquire(self.database)
-            matches = enquire.get_mset(self.first, self.maxitems, self.check_at_least)
+            matches = enquire.get_mset(self.first, maxitems, check_at_least)
         except (xapian.NetworkError, xapian.DatabaseModifiedError):
             self.database = xapian_reopen(self.database, data=self.data, log=self.log)
             try:
                 enquire = self.get_enquire(self.database)
-                matches = self.enquire.get_mset(self.first, self.maxitems, self.check_at_least)
+                matches = self.enquire.get_mset(self.first, maxitems, check_at_least)
             except (xapian.NetworkError, xapian.DatabaseError) as e:
                 raise XapianError(e)
 
+        self.size = matches.size()
+
         if self.get_size:
-            self.size = matches.size()
+            yield {
+                'size': self.size,
+                'estimated': matches.get_matches_estimated(),
+            }
 
         if self.spies:
             for name, spy in self.spies.items():
                 for facet in spy.values():
-                    yield json.dumps({
+                    yield {
                         'facet': name,
                         'term': facet.term.decode('utf-8'),
                         'termfreq': facet.termfreq,
-                    }, ensure_ascii=False)
+                    }
 
         produced = 0
         for match in matches:
@@ -215,10 +225,8 @@ class Search(object):
                 result.update({
                     'terms': [t.term.decode('utf-8') for t in match.document.termlist()],
                 })
-            yield json.dumps(result, ensure_ascii=False)
-
-        if self.size is None:
-            self.size = produced
+            yield result
+        self.produced = produced
 
     @property
     def results(self):

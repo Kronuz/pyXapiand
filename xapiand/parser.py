@@ -164,6 +164,13 @@ def search_parser(query_string):
         LIMIT <limit>
         ORDER BY <field_name ...> [ASC|DESC]
     """
+    try:
+        query_string = json.loads(query_string)
+    except (ValueError, TypeError):
+        pass
+    if isinstance(query_string, dict):
+        return query_string
+
     first = 0
     partials = []
     maxitems = 10000
@@ -241,16 +248,14 @@ def search_parser(query_string):
             # print "search:", search
             continue
 
-    parsed = (
-        first,
-        maxitems,
-        sort_by,
-        sort_by_reversed,
-        facets,
-        check_at_least,
-        partials,
-        terms,
-        search,
-    )
-
-    return parsed
+    return {
+        'first': first,
+        'maxitems': maxitems,
+        'sort_by': sort_by,
+        'sort_by_reversed': sort_by_reversed,
+        'facets': facets,
+        'check_at_least': check_at_least,
+        'partials': partials,
+        'terms': terms,
+        'search': search,
+    }

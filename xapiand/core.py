@@ -20,7 +20,7 @@ def get_slot(name):
 
 def _xapian_subdatabase(databases_pool, db, writable, create, data='.', log=None):
     parse = parse_url(db)
-    scheme, hostname, port, username, password, path, query = parse
+    scheme, hostname, port, username, password, path, query, query_dict = parse
     key = (scheme, hostname, port, username, password, path)
     try:
         return databases_pool[(writable, key)], False
@@ -28,11 +28,11 @@ def _xapian_subdatabase(databases_pool, db, writable, create, data='.', log=None
         if scheme == 'file':
             database = _xapian_database_open(databases_pool, path, writable, create, data, log)
         elif scheme == 'xapian':
-            timeout = int(query.get('timeout', 0))
+            timeout = int(query_dict.get('timeout', 0))
             database = _xapian_database_connect(databases_pool, hostname, port or 33333, timeout, writable, data, log)
-        database._url = build_url(*parse)
+        database._db = db
         databases_pool[(writable, key)] = database
-        log.debug("Subdatabase %s: %s", 'created' if create else 'opened', database._url)
+        log.debug("Subdatabase %s: %s", 'created' if create else 'opened', database._db)
         return database, True
 
 
@@ -98,19 +98,10 @@ def _xapian_database(databases_pool, endpoints, writable, create, data='.', log=
                 database._all_databases_config[subdatabase_number] = (db, writable, create)
                 if _database:
                     database.add_database(_database)
-        database._url = ' '.join(d._url for d in database._all_databases if d)
+        database._db = ' '.join(d._db for d in database._all_databases if d)
         databases_pool[(writable, endpoints)] = database
-        log.debug("Databases %s: %s", 'created' if create else 'opened', database._url)
+        log.debug("Databases %s: %s", 'created' if create else 'opened', database._db)
         return database, True
-
-
-def xapian_endpoints(paths, locations, timeout):
-    endpoints = []
-    for path in paths:
-        endpoints.append(path)
-    for host, port in locations:
-        endpoints.append((host, port, timeout))
-    return tuple(endpoints)
 
 
 def xapian_database(databases_pool, endpoints, writable, create=False, data='.', log=None):
@@ -118,6 +109,7 @@ def xapian_database(databases_pool, endpoints, writable, create=False, data='.',
     Returns a xapian.Database with multiple endpoints attached.
 
     """
+    endpoints = tuple(build_url(*parse_url(db.strip())) for db in endpoints)
     database, fresh = _xapian_database(databases_pool, endpoints, writable, create, data=data, log=log)
     if not writable and not fresh:  # Make sure we always read the latest:
         database = xapian_reopen(database, data=data, log=log)
@@ -146,7 +138,7 @@ def xapian_reopen(database, data='.', log=None):
         for subdatabase in database._all_databases:
             subdatabase_number = database._all_databases.index(subdatabase)
             db, writable, create = database._all_databases_config[subdatabase_number]
-            scheme, hostname, port, username, password, path, query = parse_url(db)
+            scheme, hostname, port, username, password, path, query, query_dict = parse_url(db)
             key = (scheme, hostname, port, username, password, path)
 
             # Remove subdatabase from pool
@@ -162,6 +154,7 @@ def xapian_reopen(database, data='.', log=None):
 
 
 def xapian_index(databases_pool, db, document, commit=False, data='.', log=None):
+    db = build_url(*parse_url(db.strip()))
     subdatabase, _ = _xapian_subdatabase(databases_pool, db, True, False, data, log)
     if not subdatabase:
         log.error("Database is None (db:%s)", db)
@@ -244,6 +237,7 @@ def xapian_index(databases_pool, db, document, commit=False, data='.', log=None)
 
 
 def xapian_delete(databases_pool, db, document_id, commit=False, data='.', log=None):
+    db = build_url(*parse_url(db))
     subdatabase, _ = _xapian_subdatabase(databases_pool, db, True, False, data=data, log=log)
     if not subdatabase:
         log.error("Database is None (db:%s)", db)
@@ -256,6 +250,7 @@ def xapian_delete(databases_pool, db, document_id, commit=False, data='.', log=N
 
 
 def xapian_commit(databases_pool, db, data='.', log=None):
+    db = build_url(*parse_url(db))
     subdatabase, _ = _xapian_subdatabase(databases_pool, db, True, False, data=data, log=log)
     if not subdatabase:
         log.error("Database is None (db:%s)", db)

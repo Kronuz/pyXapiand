@@ -13,11 +13,11 @@ import multiprocessing
 import gevent
 from gevent import queue
 
-from .. import version
+from .. import version, json
 from ..exceptions import InvalidIndexError, XapianError
 from ..core import xapian_database, xapian_commit, xapian_index, xapian_delete
 from ..platforms import create_pidlock
-from ..utils import colored_logging
+from ..utils import colored_logging, parse_url, build_url
 from ..parser import index_parser, search_parser
 from ..search import Search
 
@@ -160,28 +160,29 @@ class XapianReceiver(CommandReceiver):
             self.sendLine(">> ERR: [405] Select a database with the command USING")
     open = using
 
-    def _search(self, line, get_matches, get_data, get_terms, get_size):
+    def _search(self, query_string, get_matches, get_data, get_terms, get_size):
         try:
             database = self._get_database()
         except InvalidIndexError as e:
             self.sendLine(">> ERR: Search: %s" % e)
             return
 
+        query = search_parser(query_string)
+
         search = Search(
             database,
-            line,
+            query,
             get_matches=get_matches,
             get_data=get_data,
             get_terms=get_terms,
             get_size=get_size,
             data=self.data,
-            log=self.log,
-        )
+            log=self.log)
 
         start = time.time()
         try:
             for line in search.results:
-                self.sendLine(line)
+                self.sendLine(json.dumps(line, ensure_ascii=False))
         except XapianError as e:
             self.sendLine(">> ERR: Unable to get results: %s" % e)
             return
@@ -203,7 +204,7 @@ class XapianReceiver(CommandReceiver):
 
     @command(threaded=True, db=True, reopen=True)
     def terms(self, line):
-        self._search(line, get_matches=True, get_data=False, get_terms=True, get_size=False)
+        self._search(line, get_matches=True, get_data=False, get_terms=True, get_size=True)
     terms.__doc__ = """
     Finds and lists the terms of the documents.
 
@@ -212,7 +213,7 @@ class XapianReceiver(CommandReceiver):
 
     @command(threaded=True, db=True, reopen=True)
     def find(self, line):
-        self._search(line, get_matches=True, get_data=False, get_terms=False, get_size=False)
+        self._search(line, get_matches=True, get_data=False, get_terms=False, get_size=True)
     find.__doc__ = """
     Finds documents.
 
@@ -221,7 +222,7 @@ class XapianReceiver(CommandReceiver):
 
     @command(threaded=True, db=True, reopen=True)
     def search(self, line):
-        self._search(line, get_matches=True, get_data=True, get_terms=False, get_size=False)
+        self._search(line, get_matches=True, get_data=True, get_terms=False, get_size=True)
     search.__doc__ = """
     Search documents.
 
@@ -286,7 +287,7 @@ class XapianReceiver(CommandReceiver):
         """
         self._delete(line, True)
 
-    def _index(self, line, commit):
+    def _index(self, line, commit, **kwargs):
         self._do_reopen = True
         result = index_parser(line)
         if isinstance(result, tuple):
@@ -337,14 +338,20 @@ class XapianReceiver(CommandReceiver):
         self.sendLine(">> OK")
         self._init()
 
+    @command
+    def databases(self, line=''):
+        self.sendLine(">> OK: %s" % " ".join(db for db in self.server.databases))
+
 
 class XapianServer(CommandServer):
     receiver_class = XapianReceiver
 
     def __init__(self, *args, **kwargs):
         data = kwargs.pop('data', '.')
+        databases = kwargs.pop('databases')
         super(XapianServer, self).__init__(*args, **kwargs)
         self.data = data
+        self.databases = databases
         if not hasattr(g_tl, 'databases_pool'):
             g_tl.databases_pool = {}
         self.databases_pool = g_tl.databases_pool
@@ -550,13 +557,13 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
         maximum=commit_timeout * 9.0,
     )
 
-    if ':' not in port:
-        port = ':%s' % port
-    server = XapianServer(port, data=data, log=log)
-
     databases_pool = {}
     databases = {}
     to_commit = {}
+
+    if ':' not in port:
+        port = ':%s' % port
+    server = XapianServer(port, databases=databases, data=data, log=log)
 
     def _server_stop(sig=None):
         global STOPPED
@@ -601,7 +608,7 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
     except IOError:
         epfile = None
     for db in epfile or []:
-        db = db.strip()
+        db = build_url(*parse_url(db.strip()))
         name = _database_name(db)
         if db not in databases:
             tq = get_queue(name=os.path.join(data, name), log=log)
@@ -638,6 +645,7 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
             continue
 
         for db in endpoints:
+            db = build_url(*parse_url(db.strip()))
             name = _database_name(db)
             if db in databases:
                 t, tq = databases[db]
