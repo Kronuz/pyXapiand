@@ -27,7 +27,10 @@ def command(threaded=False, **kwargs):
                 client_socket = socket.socket(_sock=_sock)  # Create a gevent socket from the raw socket
                 self.client_socket = client_socket
                 self.socket_file = client_socket.makefile()
-                return func(self, *args, **kwargs)
+                try:
+                    return func(self, *args, **kwargs)
+                except (IOError, RuntimeError, socket.error) as e:
+                    self.log.error("Command %s error: %s", func.command, e)
             return wrapped
         else:
             return func
