@@ -16,7 +16,7 @@ MAX_DOCS = 10000
 class Search(object):
     def __init__(self, database, obj,
                  get_matches=True, get_data=True, get_terms=False, get_size=False,
-                 data='.', log=logging):
+                 data='.', log=logging, dead=False):
         self.log = log
         self.data = data
         self.get_matches = get_matches
@@ -24,6 +24,7 @@ class Search(object):
         self.get_data = get_data
         self.get_size = get_size
         self.size = None
+        self.dead = dead
 
         # SEARCH
         qp = xapian.QueryParser()
@@ -52,6 +53,7 @@ class Search(object):
             # Partials (for autocomplete) using FLAG_PARTIAL and OP_AND_MAYBE
             partials_query = None
             for partial in partials:
+                self.dead or 'alive'  # Raises DeadException when needed
                 partial = normalize(partial)
                 flags = xapian.QueryParser.FLAG_WILDCARD | xapian.QueryParser.FLAG_PARTIAL
                 try:
@@ -125,6 +127,7 @@ class Search(object):
 
         if self.facets:
             for name in self.facets:
+                self.dead or 'alive'  # Raises DeadException when needed
                 name = name.strip().lower()
                 slot = get_slot(name)
                 if slot:
@@ -136,6 +139,7 @@ class Search(object):
 
         if self.sort_by:
             for sort_field in self.sort_by:
+                self.dead or 'alive'  # Raises DeadException when needed
                 if sort_field.startswith('-'):
                     reverse = True
                     sort_field = sort_field[1:]  # Strip the '-'
@@ -145,6 +149,7 @@ class Search(object):
 
             sorter = xapian.MultiValueKeyMaker()
             for name, reverse in sort_by:
+                self.dead or 'alive'  # Raises DeadException when needed
                 name = name.strip().lower()
                 slot = get_slot(name)
                 if slot:
@@ -193,7 +198,9 @@ class Search(object):
 
         if self.spies:
             for name, spy in self.spies.items():
+                self.dead or 'alive'  # Raises DeadException when needed
                 for facet in spy.values():
+                    self.dead or 'alive'  # Raises DeadException when needed
                     yield {
                         'facet': name,
                         'term': facet.term.decode('utf-8'),
@@ -202,6 +209,7 @@ class Search(object):
 
         produced = 0
         for match in matches:
+            self.dead or 'alive'  # Raises DeadException when needed
             produced += 1
             result = {
                 'id': match.docid,
@@ -228,8 +236,12 @@ class Search(object):
                     'data': data,
                 })
             if self.get_terms:
+                terms = []
+                for t in match.document.termlist():
+                    self.dead or 'alive'  # Raises DeadException when needed
+                    terms.append(t.term.decode('utf-8'))
                 result.update({
-                    'terms': [t.term.decode('utf-8') for t in match.document.termlist()],
+                    'terms': terms,
                 })
             yield result
         self.produced = produced

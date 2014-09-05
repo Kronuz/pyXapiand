@@ -15,6 +15,27 @@ class QuitCommand(Exception):
     pass
 
 
+class DeadException(Exception):
+    pass
+
+
+class AliveCommand(object):
+    """
+    Raises DeadException if the object's cmd_id id is not the same
+    as it was when the object was created.
+
+    """
+    def __init__(self, obj):
+        obj.cmd_id = getattr(obj, 'cmd_id', 0) + 1
+        self.obj = obj
+        self.cmd_id = obj.cmd_id
+
+    def __nonzero__(self):
+        if self.cmd_id == self.obj.cmd_id:
+            return False
+        raise DeadException
+
+
 def command(threaded=False, **kwargs):
     def _command(func):
         func.command = func.__name__
@@ -31,6 +52,8 @@ def command(threaded=False, **kwargs):
                     return func(self, *args, **kwargs)
                 except (IOError, RuntimeError, socket.error) as e:
                     self.log.error("Command %s error: %s", func.command, e)
+                except DeadException:
+                    self.log.warning("Command %s was cancelled!", func.command)
             return wrapped
         else:
             return func
@@ -54,6 +77,7 @@ class ClientReceiver(object):
         self.closed = False
         self.encoding = encoding
         self.encoding_errors = encoding_errors
+        self.cmd_id = 0
 
     def close(self):
         self.closed = True
@@ -90,8 +114,9 @@ class ClientReceiver(object):
             line = self.readline()
 
     def dispatch(self, func, line):
+        dead = AliveCommand(self)
         if func.threaded:
-            self.server.pool.spawn(func, self.client_socket._sock, line)
+            self.server.pool.spawn(func, self.client_socket._sock, line, dead)
         else:
             func(line)
 

@@ -160,7 +160,7 @@ class XapianReceiver(CommandReceiver):
             self.sendLine(">> ERR: [405] Select a database with the command USING")
     open = using
 
-    def _search(self, query, get_matches, get_data, get_terms, get_size):
+    def _search(self, query, get_matches, get_data, get_terms, get_size, dead):
         try:
             database = self._get_database()
         except InvalidIndexError as e:
@@ -177,7 +177,8 @@ class XapianReceiver(CommandReceiver):
             get_terms=get_terms,
             get_size=get_size,
             data=self.data,
-            log=self.log)
+            log=self.log,
+            dead=dead)
 
         try:
             for result in search.results:
@@ -193,14 +194,14 @@ class XapianReceiver(CommandReceiver):
         self.sendLine(">> OK: %s documents found in %sms" % (size, 1000.00 * (time.time() - start)))
 
     @command(threaded=True, db=True, reopen=True)
-    def facets(self, line):
+    def facets(self, line, dead):
         query = search_parser(line)
         query['facets'] = query['facets'] or query['search']
         query['search'] = '*'
         del query['first']
         query['maxitems'] = 0
         del query['sort_by']
-        self._search(query, get_matches=False, get_data=False, get_terms=False, get_size=False)
+        self._search(query, get_matches=False, get_data=False, get_terms=False, get_size=False, dead=dead)
     facets.__doc__ = """
     Finds and lists the facets of a query.
 
@@ -208,10 +209,10 @@ class XapianReceiver(CommandReceiver):
     """ + search_parser.__doc__
 
     @command(threaded=True, db=True, reopen=True)
-    def terms(self, line):
+    def terms(self, line, dead):
         query = search_parser(line)
         del query['facets']
-        self._search(query, get_matches=True, get_data=False, get_terms=True, get_size=True)
+        self._search(query, get_matches=True, get_data=False, get_terms=True, get_size=True, dead=dead)
     terms.__doc__ = """
     Finds and lists the terms of the documents.
 
@@ -219,9 +220,9 @@ class XapianReceiver(CommandReceiver):
     """ + search_parser.__doc__
 
     @command(threaded=True, db=True, reopen=True)
-    def find(self, line):
+    def find(self, line, dead):
         query = search_parser(line)
-        self._search(query, get_matches=True, get_data=False, get_terms=False, get_size=True)
+        self._search(query, get_matches=True, get_data=False, get_terms=False, get_size=True, dead=dead)
     find.__doc__ = """
     Finds documents.
 
@@ -229,9 +230,9 @@ class XapianReceiver(CommandReceiver):
     """ + search_parser.__doc__
 
     @command(threaded=True, db=True, reopen=True)
-    def search(self, line):
+    def search(self, line, dead):
         query = search_parser(line)
-        self._search(query, get_matches=True, get_data=True, get_terms=False, get_size=True)
+        self._search(query, get_matches=True, get_data=True, get_terms=False, get_size=True, dead=dead)
     search.__doc__ = """
     Search documents.
 
