@@ -37,8 +37,8 @@ class XapianConnection(Connection):
         return response
 
     def _response(self, line):
-        line = line.decode(self.encoding)
         if line.startswith(">>"):
+            line = line.decode(self.encoding)
             if line.startswith(">> OK"):
                 return line[7:] or None
             if line.startswith(">> ERR"):
