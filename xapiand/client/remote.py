@@ -4,6 +4,7 @@ from .. import json
 
 from ..exceptions import XapianError
 from ..parser import search_parser
+from ..results import XapianResults
 
 from .connection import Connection, ServerPool, command
 
@@ -65,6 +66,7 @@ class XapianConnection(Connection):
     def facets(self, search, *facets, **kwargs):
         terms = kwargs.get('terms')
         partials = kwargs.get('partials')
+        results_class = kwargs.get('results_class', XapianResults)
         query = search_parser(search if isinstance(search, dict) else 'FACETS ' + search)
         query['search'] = '*'
         if facets is not None:
@@ -77,11 +79,10 @@ class XapianConnection(Connection):
         query['maxitems'] = 0
         del query['sort_by']
         results = self._search('FACETS', **query)
-        for result in results:
-            yield result
+        return results_class(results)
 
     @command
-    def terms(self, search=None, terms=None, partials=None, offset=None, limit=None, order_by=None):
+    def terms(self, search=None, terms=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
         query = search_parser(search if isinstance(search, dict) else 'TERMS ' + search)
         del query['facets']
         if terms is not None:
@@ -95,11 +96,10 @@ class XapianConnection(Connection):
         if order_by is not None:
             query['sort_by'] = order_by
         results = self._search('TERMS', **query)
-        for result in results:
-            yield result
+        return results_class(results)
 
     @command
-    def find(self, search=None, facets=None, terms=None, partials=None, offset=None, limit=None, order_by=None):
+    def find(self, search=None, facets=None, terms=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
         query = search_parser(search)
         if facets is not None:
             query['facets'] = facets
@@ -114,11 +114,10 @@ class XapianConnection(Connection):
         if order_by is not None:
             query['sort_by'] = order_by
         results = self._search('FIND', **query)
-        for result in results:
-            yield result
+        return results_class(results)
 
     @command
-    def search(self, search=None, facets=None, terms=None, partials=None, offset=None, limit=None, order_by=None):
+    def search(self, search=None, facets=None, terms=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
         query = search_parser(search)
         if facets is not None:
             query['facets'] = facets
@@ -133,8 +132,7 @@ class XapianConnection(Connection):
         if order_by is not None:
             query['sort_by'] = order_by
         results = self._search('SEARCH', **query)
-        for result in results:
-            yield result
+        return results_class(results)
 
     @command
     def count(self, search=None, terms=None, partials=None):

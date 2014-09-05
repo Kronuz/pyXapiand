@@ -7,6 +7,7 @@ from ..core import xapian_index, xapian_commit, xapian_delete, xapian_database
 from ..parser import index_parser, search_parser
 from ..search import Search
 from ..exceptions import XapianError
+from ..results import XapianResults
 
 
 class Xapian(object):
@@ -77,6 +78,7 @@ class Xapian(object):
 
         terms = kwargs.get('terms')
         partials = kwargs.get('partials')
+        results_class = kwargs.get('results_class', XapianResults)
         query = search_parser(search if isinstance(search, dict) else 'FACETS ' + search)
         query['search'] = '*'
         if facets is not None:
@@ -89,10 +91,9 @@ class Xapian(object):
         query['maxitems'] = 0
         del query['sort_by']
         search = self._search(query, get_matches=False, get_data=False, get_terms=False, get_size=False)
-        for result in search.results:
-            yield result
+        return results_class(search.results)
 
-    def terms(self, search=None, terms=None, partials=None, offset=None, limit=None, order_by=None):
+    def terms(self, search=None, terms=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
         self._check_db()
         query = search_parser(search if isinstance(search, dict) else 'TERMS ' + search)
         del query['facets']
@@ -107,10 +108,9 @@ class Xapian(object):
         if order_by is not None:
             query['sort_by'] = order_by
         search = self._search(query, get_matches=True, get_data=False, get_terms=True, get_size=True)
-        for result in search.results:
-            yield result
+        return results_class(search.results)
 
-    def find(self, search=None, facets=None, terms=None, partials=None, offset=None, limit=None, order_by=None):
+    def find(self, search=None, facets=None, terms=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
         self._check_db()
         query = search_parser(search)
         if facets is not None:
@@ -126,10 +126,9 @@ class Xapian(object):
         if order_by is not None:
             query['sort_by'] = order_by
         search = self._search(query, get_matches=True, get_data=False, get_terms=False, get_size=True)
-        for result in search.results:
-            yield result
+        return results_class(search.results)
 
-    def search(self, search=None, facets=None, terms=None, partials=None, offset=None, limit=None, order_by=None):
+    def search(self, search=None, facets=None, terms=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
         self._check_db()
         query = search_parser(search)
         if facets is not None:
@@ -145,8 +144,7 @@ class Xapian(object):
         if order_by is not None:
             query['sort_by'] = order_by
         search = self._search(query, get_matches=True, get_data=True, get_terms=False, get_size=True)
-        for result in search.results:
-            yield result
+        return results_class(search.results)
 
     def count(self, search=None, terms=None, partials=None):
         if search or terms or partials:
