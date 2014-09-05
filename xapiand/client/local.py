@@ -31,7 +31,6 @@ class Xapian(object):
     def _reopen(self, create=False, endpoints=None):
         self._get_database(create=create, endpoints=endpoints)
         self._do_reopen = False
-        self._do_init = True
 
     def version(self):
         return version
@@ -138,7 +137,8 @@ class Xapian(object):
         if not isinstance(result, tuple):
             return result
         endpoints, document = result
-        endpoints = endpoints or self.endpoints
+        if not endpoints:
+            endpoints = self.endpoints
         if not endpoints:
             self._check_db()
         for db in endpoints:

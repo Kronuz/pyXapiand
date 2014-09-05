@@ -62,7 +62,8 @@ class XapianReceiver(CommandReceiver):
         data = kwargs.pop('data', '.')
         super(XapianReceiver, self).__init__(*args, **kwargs)
         self._do_reopen = False
-        self._do_init = False
+        self._do_init = set()
+        self._inited = set()
         self.databases_pool = self.server.databases_pool
         self.endpoints = None
         self.data = data
@@ -83,7 +84,7 @@ class XapianReceiver(CommandReceiver):
     def _reopen(self, create=False, endpoints=None):
         self._get_database(create=create, endpoints=endpoints)
         self._do_reopen = False
-        self._do_init = True
+        self._do_init.add(endpoints)
 
     @command
     def version(self, line):
@@ -252,16 +253,18 @@ class XapianReceiver(CommandReceiver):
     """
 
     def _init(self):
-        if self._do_init:
-            _xapian_init(self.endpoints, queue=main_queue, data=self.data, log=self.log)
-            self._do_init = False
+        while self._do_init:
+            endpoints = self._do_init.pop()
+            if endpoints not in self._inited:
+                _xapian_init(endpoints, queue=main_queue, data=self.data, log=self.log)
+                self._inited.add(endpoints)
 
     def _delete(self, line, commit):
-        self._init()
         self._do_reopen = True
         for db in self.endpoints:
             _xapian_delete(db, line, commit=commit, data=self.data, log=self.log)
         self.sendLine(">> OK")
+        self._init()
 
     @command(db=True)
     def delete(self, line):
@@ -284,18 +287,21 @@ class XapianReceiver(CommandReceiver):
         self._delete(line, True)
 
     def _index(self, line, commit):
-        self._init()
         self._do_reopen = True
         result = index_parser(line)
         if isinstance(result, tuple):
             endpoints, document = result
-            endpoints = endpoints or self.endpoints
+            if not endpoints:
+                endpoints = self.endpoints
+            else:
+                self._do_init.add(endpoints)
             if not endpoints:
                 self.sendLine(">> ERR: %s" % "You must connect to a database first")
                 return
             for db in endpoints:
                 _xapian_index(db, document, commit=commit, data=self.data, log=self.log)
             self.sendLine(">> OK")
+            self._init()
         else:
             self.sendLine(result)
 
@@ -325,11 +331,11 @@ class XapianReceiver(CommandReceiver):
         Usage: COMMIT
 
         """
-        self._init()
         self._do_reopen = True
         for db in self.endpoints or self.endpoints:
             _xapian_commit(db, data=self.data, log=self.log)
         self.sendLine(">> OK")
+        self._init()
 
 
 class XapianServer(CommandServer):

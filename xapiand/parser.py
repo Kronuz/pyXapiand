@@ -86,6 +86,7 @@ def index_parser(document):
         endpoints = document.pop('endpoints')
         if not isinstance(endpoints, list):
             return ">> ERR: [400] 'endpoints' must be a list"
+        endpoints = tuple(endpoints)
     except KeyError:
         endpoints = None
 
