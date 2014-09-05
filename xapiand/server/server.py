@@ -167,6 +167,8 @@ class XapianReceiver(CommandReceiver):
             self.sendLine(">> ERR: Search: %s" % e)
             return
 
+        start = time.time()
+
         search = Search(
             database,
             query,
@@ -177,10 +179,9 @@ class XapianReceiver(CommandReceiver):
             data=self.data,
             log=self.log)
 
-        start = time.time()
         try:
-            for line in search.results:
-                self.sendLine(json.dumps(line, ensure_ascii=False))
+            for result in search.results:
+                self.sendLine(json.dumps(result, ensure_ascii=False))
         except XapianError as e:
             self.sendLine(">> ERR: Unable to get results: %s" % e)
             return
