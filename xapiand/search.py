@@ -218,6 +218,8 @@ class Search(object):
                         data = match.document.get_data()
                     except xapian.NetworkError as e:
                         raise XapianError(e)
+                except xapian.DocNotFoundError:
+                    continue
                 try:
                     data = json.loads(data)
                 except:
