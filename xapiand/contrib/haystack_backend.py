@@ -12,6 +12,7 @@ from xapiand import Xapian
 from xapiand.core import get_slot
 from xapiand.serialise import LatLongCoord
 from xapiand.exceptions import XapianError
+from xapiand.results import XapianResults
 
 from haystack import connections
 from haystack.constants import ID, DEFAULT_ALIAS
@@ -69,29 +70,10 @@ def consistent_hash(key, num_buckets):
     return b & 0xffffffff
 
 
-class XapianResults(object):
-    def __init__(self, result_class, first_result, results, size):
-        self.result_class = result_class
-        self.first_result = first_result
-        self.results = results
-        self.size = size
-
-    def __len__(self):
-        return self.size
-
-    def __iter__(self):
-        return self
-
-    def next(self):
-        if self.first_result is not None:
-            first_result, self.first_result = self.first_result, None
-            return self.get_data(first_result)
-        return self.get_data(self.results.next())
-    __next__ = next
-
+class XapianSearchResults(XapianResults):
     def get_data(self, result):
         app_label, module_name, pk, model_data = pickle.loads(result['data'].encode('utf-8'))
-        return self.result_class(app_label, module_name, pk, result['weight'], **model_data)
+        return SearchResult(app_label, module_name, pk, result['weight'], **model_data)
 
 
 class XapianSearchBackend(BaseSearchBackend):
@@ -191,7 +173,7 @@ class XapianSearchBackend(BaseSearchBackend):
             positions=True,
         )
 
-    def update(self, index, iterable, commit=False):
+    def update(self, index, iterable, commit=False, mod=False):
         for obj in iterable:
             self.updater(index, obj, commit=commit)
 
@@ -215,33 +197,22 @@ class XapianSearchBackend(BaseSearchBackend):
             If faceting was not used, the `facets` key will not be present
 
         """
-        result_class = kwargs.get('result_class', SearchResult)
 
-        hits = 0
-        size = 0
         facets = {
             'fields': {},
             'dates': {},
             'queries': {},
         }
 
-        first_result = None
-        results = self.xapian.search(query_string)
-        for result in results:
-            if 'data' in result:
-                first_result = result
-                break
-            elif 'size' in result:
-                size = result['size']
-                hits = result['estimated']
-            elif 'facet' in result:
-                facets['fields'][result['name']] = (result['term'], result['termfreq'])
+        results = self.xapian.search(query_string, results_class=XapianSearchResults)
+        for facet in results.facets:
+            facets['fields'][facet['name']] = (facet['term'], facet['termfreq'])
 
         return {
-            'results': XapianResults(result_class, first_result, results, size),
+            'results': results,
             'facet': facets,
-            'hits': hits,
-            'size': size,
+            'hits': results.estimated,
+            'size': results.size,
         }
 
     def build_search_kwargs(self, query_string, sort_by=None, start_offset=0, end_offset=None,
