@@ -184,7 +184,7 @@ class XapianSearchBackend(BaseSearchBackend):
         pass
 
     @log_query
-    def search(self, query_string, **kwargs):
+    def search(self, query_string, end_offset=None, start_offset=None, **kwargs):
         """
         Returns:
             A dictionary with the following keys:
@@ -197,6 +197,13 @@ class XapianSearchBackend(BaseSearchBackend):
             If faceting was not used, the `facets` key will not be present
 
         """
+        offset = start_offset
+        limit = end_offset - start_offset
+        if limit <= 0:
+            return {
+                'results': [],
+                'hits': 0,
+            }
 
         facets = {
             'fields': {},
@@ -204,7 +211,7 @@ class XapianSearchBackend(BaseSearchBackend):
             'queries': {},
         }
 
-        results = self.xapian.search(query_string, results_class=XapianSearchResults)
+        results = self.xapian.search(query_string, offset=offset, limit=limit, results_class=XapianSearchResults)
         for facet in results.facets:
             facets['fields'][facet['name']] = (facet['term'], facet['termfreq'])
 
