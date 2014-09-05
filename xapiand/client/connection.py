@@ -296,7 +296,7 @@ class Connection(object):
                     exc_info[2])
 
     def pack_command(self, *args):
-        return "%s%s" % (" ".join(args), self.delimiter)
+        return "%s%s" % (" ".join(a for a in args if a), self.delimiter)
 
     @with_retry
     def execute_command(self, command_name, *args):
