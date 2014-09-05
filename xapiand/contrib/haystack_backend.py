@@ -11,6 +11,7 @@ except ImportError:
 from xapiand import Xapian
 from xapiand.core import get_slot
 from xapiand.serialise import LatLongCoord
+from xapiand.exceptions import XapianError
 
 from haystack import connections
 from haystack.constants import ID, DEFAULT_ALIAS
@@ -113,7 +114,13 @@ class XapianSearchBackend(BaseSearchBackend):
             raise ImproperlyConfigured("You must specify 'PATH' in your settings for connection '%s'." % connection_alias)
 
         self.language = language or getattr(settings, 'HAYSTACK_XAPIAN_LANGUAGE', 'english')
-        self.xapian = Xapian('localhost:8890', using=self.endpoints)
+        try:
+            self.xapian = Xapian('localhost:8890', using=self.endpoints)
+        except XapianError:
+            self.xapian = Xapian('localhost:8890')
+            for endpoint in self.endpoints:
+                self.xapian.create(endpoint)
+            self.xapian.using(self.endpoints)
 
     def updater(self, index, obj, commit):
         data = index.full_prepare(obj)
