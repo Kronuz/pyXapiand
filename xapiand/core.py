@@ -32,6 +32,8 @@ def _xapian_subdatabase(databases_pool, db, writable, create, data='.', log=logg
         elif scheme == 'xapian':
             timeout = int(query_dict.get('timeout', 0))
             database = _xapian_database_connect(databases_pool, hostname, port or 33333, timeout, writable, data, log)
+        else:
+            raise InvalidIndexError("Invalid database scheme")
         database._db = db
         databases_pool[(writable, key)] = database
         log.debug("Subdatabase %s: %s", 'created' if create else 'opened', database._db)
