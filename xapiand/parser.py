@@ -181,7 +181,7 @@ def search_parser(query_string):
     facets = None
     terms = None
 
-    query_string = 'SEARCH %s' % query_string
+    query_string = 'SEARCH %s' % (query_string or '')
     query_re = r''.join('(%s.*)' % s for s in CMDS_RE.findall(query_string))
 
     for string in re.search(query_re, query_string).groups():
@@ -249,13 +249,14 @@ def search_parser(query_string):
             continue
 
     return {
+        'search': search,
+        'facets': facets,
+        'terms': terms,
+        'partials': partials,
         'first': first,
         'maxitems': maxitems,
         'sort_by': sort_by,
+
         'sort_by_reversed': sort_by_reversed,
-        'facets': facets,
         'check_at_least': check_at_least,
-        'partials': partials,
-        'terms': terms,
-        'search': search,
     }
