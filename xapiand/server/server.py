@@ -408,7 +408,7 @@ def _database_command(databases_pool, cmd, db, args, data='.', log=None):
         raise
     duration = time.time() - start
     docid = ' -> %s' % docid if docid else ''
-    log.debug("Executed %s %s(%s)%s (db:%s) ~ %0.3f s", "unknown command" if unknown else "command", cmd, arg, docid, db, duration)
+    log.debug("Executed %s %s(%s)%s (%s) ~ %0.3f s", "unknown command" if unknown else "command", cmd, arg, docid, db, duration)
     return db if cmd in ('INDEX', 'DELETE') else None  # Return db if it needs to be committed.
 
 
@@ -430,7 +430,7 @@ def _database_commit(databases_pool, to_commit, commit_lock, timeouts, force=Fal
             if dt1 <= expires_delayed or dt2 <= expires:
                 do_commit = locked = commit_lock.acquire(False)
                 if not locked:
-                    log.debug("Out of commit slots, commit delayed! (db:%s)", db)
+                    log.debug("Out of commit slots, commit delayed! (%s)", db)
         if do_commit:
             try:
                 _database_command(databases_pool, 'COMMIT', db, (), data=data, log=log)
@@ -455,19 +455,23 @@ def _xapian_init(endpoints, queue=None, data='.', log=None):
 
 
 def _xapian_commit(db, data='.', log=None):
+    db = build_url(*parse_url(db.strip()))
     name = _database_name(db)
     queue = get_queue(name=os.path.join(data, name), log=log)
     _enqueue(('COMMIT', (db,), ()), queue=queue, data=data, log=log or logger)
 
 
 def _xapian_index(db, document, commit=False, data='.', log=None):
+    db = build_url(*parse_url(db.strip()))
     name = _database_name(db)
     queue = get_queue(name=os.path.join(data, name), log=log)
     _enqueue(('CINDEX' if commit else 'INDEX', (db,), (document,)), queue=queue, data=data, log=log or logger)
 
 
 def _xapian_delete(db, document_id, commit=False, data='.', log=None):
-    queue = get_queue(name=_database_name(db), log=log)
+    db = build_url(*parse_url(db.strip()))
+    name = _database_name(db)
+    queue = get_queue(name=name, log=log)
     _enqueue(('CDELETE' if commit else 'DELETE', (db,), (document_id,)), queue=queue, data=data, log=log or logger)
 
 
@@ -476,7 +480,7 @@ def _thread_loop(databases_pool, db, tq, commit_lock, timeouts, data, log):
     name = _database_name(db)
     to_commit = {}
 
-    log.debug("Worker thread %s started! (db:%s)", name, db)
+    log.debug("Worker thread %s started! (%s)", name, db)
 
     msg = None
     timeout = timeouts.timeout
@@ -496,6 +500,7 @@ def _thread_loop(databases_pool, db, tq, commit_lock, timeouts, data, log):
             continue
 
         for _db in endpoints:
+            _db = build_url(*parse_url(_db.strip()))
             if _db != db:
                 log.error("Thread received command for the wrong database!")
                 continue
@@ -508,7 +513,7 @@ def _thread_loop(databases_pool, db, tq, commit_lock, timeouts, data, log):
                     to_commit[needs_commit] = (now, now, now)
 
     _database_commit(databases_pool, to_commit, commit_lock, timeouts, force=True, data=data, log=log)
-    log.debug("Worker thread %s ended! (db:%s)", name, db)
+    log.debug("Worker thread %s ended! (%s)", name, db)
 
 
 def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=0,
@@ -530,7 +535,7 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
             console = logging.StreamHandler(sys.stderr)
             console.setFormatter(formatter)
             log.addHandler(console)
-    loglevel = ['ERROR', 'WARNING', 'INFO', 'DEBUG'][int(verbosity)]
+    loglevel = ['ERROR', 'WARNING', 'INFO', 'DEBUG'][3 if verbosity == 'v' else int(verbosity)]
     if not hasattr(logging, loglevel):
         loglevel = 'INFO'
     _loglevel = getattr(logging, loglevel)
@@ -618,7 +623,7 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
                 args=(databases_pool, db, tq, commit_lock, timeouts, data, log))
             t.start()
             databases[db] = (t, tq)
-            log.info("Endpoint added! (db:%s)", db)
+            log.info("Endpoint added! (%s)", db)
     try:
         epfile = open(endpoints, 'at')
     except OSError:
@@ -660,7 +665,7 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
                 if epfile:
                     epfile.write("%s\n" % db)
                     epfile.flush()
-                log.info("Endpoint added! (db:%s)", db)
+                log.info("Endpoint added! (%s)", db)
             if cmd != 'INIT':
                 try:
                     tq.put((cmd, db, args))
