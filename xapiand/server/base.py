@@ -112,7 +112,7 @@ class CommandServer(StreamServer):
     pool_size = 10
 
     def __init__(self, *args, **kwargs):
-        log = kwargs.pop('log', None)
+        log = kwargs.pop('log', logging)
         super(CommandServer, self).__init__(*args, **kwargs)
         self.log = log
         self.pool = ThreadPool(self.pool_size)

@@ -1,5 +1,7 @@
 from __future__ import absolute_import, unicode_literals
 
+import logging
+
 from .. import version
 from ..core import xapian_index, xapian_commit, xapian_delete, xapian_database
 from ..parser import index_parser, search_parser
@@ -12,7 +14,7 @@ class Xapian(object):
         self.databases_pool = {}
         self.endpoints = None
         self.data = kwargs.pop('data', '.')
-        self.log = kwargs.pop('log', None)
+        self.log = kwargs.pop('log', logging)
         using = kwargs.pop('using', None)
         if using:
             self.using(using)
