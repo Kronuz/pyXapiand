@@ -103,6 +103,8 @@ class ClientReceiver(object):
 
     def sendLine(self, line):
         line += self.delimiter
+        if line[0] not in ("#", " "):
+            line = "%s. %s" % (self.cmd_id, line)
         self.socket_file.write(line.encode(self.encoding, self.encoding_errors))
         self.socket_file.flush()
 

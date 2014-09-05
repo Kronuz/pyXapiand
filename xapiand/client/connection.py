@@ -175,6 +175,7 @@ class Connection(object):
         self.encoding_errors = encoding_errors
         self._sock = None
         self._file = None
+        self.cmd_id = 0
 
     def __del__(self):
         try:
@@ -277,6 +278,8 @@ class Connection(object):
             raise
 
     def read(self, length=None):
+        cmd_id = b"%s. " % self.cmd_id
+        cmd_id_len = len(cmd_id)
         "Read the response from a previously sent command"
         while True:
             try:
@@ -301,10 +304,14 @@ class Connection(object):
                 else:
                     # no length, read a full line
                     response = self._file.readline()[:-2]
-                # print '>>', repr(response)
-                if response and response[0] == '#':
-                    continue
-                return response.decode(self.encoding, self.encoding_errors)
+                # print '--->>>>', repr(response)
+                if response:
+                    if response[0] in ("#", " "):
+                        continue
+                    if not response.startswith(cmd_id):
+                        continue
+                    response = response[cmd_id_len:].decode(self.encoding, self.encoding_errors)
+                return response
             except (socket.error, socket.timeout):
                 self.disconnect()
                 exc_info = sys.exc_info()
@@ -320,8 +327,9 @@ class Connection(object):
     # @log_command
     @with_retry
     def execute_command(self, command_name, *args):
+        self.cmd_id += 1
         command = self.pack_command(command_name, *args)
-        # print '<<', repr(command)
+        # print '<<<<---', repr(command)
         self.send(command.encode(self.encoding, self.encoding_errors))
         return self.read()
 
