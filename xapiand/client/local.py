@@ -57,10 +57,8 @@ class Xapian(object):
         self._check_db()
     open = using
 
-    def _search(self, query_string, get_matches, get_data, get_terms, get_size, **kwargs):
+    def _search(self, query, get_matches, get_data, get_terms, get_size):
         database = self._get_database()
-
-        query = search_parser(query_string or kwargs)
 
         search = Search(
             database,
@@ -74,34 +72,95 @@ class Xapian(object):
 
         return search
 
-    def facets(self, query_string=None):
+    def facets(self, search, *facets, **kwargs):
         self._check_db()
-        search = self._search('* FACETS %s LIMIT 0' % query_string, get_matches=False, get_data=False, get_terms=False, get_size=False)
+
+        terms = kwargs.get('terms')
+        partials = kwargs.get('partials')
+        query = search_parser(search if isinstance(search, dict) else 'FACETS ' + search)
+        query['search'] = '*'
+        if facets is not None:
+            query['facets'].extend(facets)
+        if terms is not None:
+            query['terms'] = terms
+        if partials is not None:
+            query['partials'] = partials
+        del query['first']
+        query['maxitems'] = 0
+        del query['sort_by']
+        search = self._search(query, get_matches=False, get_data=False, get_terms=False, get_size=False)
         for result in search.results:
             yield result
 
-    def terms(self, query_string=None, partial=None, search=None, offset=None, limit=None, order_by=None):
+    def terms(self, search=None, terms=None, partials=None, offset=None, limit=None, order_by=None):
         self._check_db()
-        search = self._search(query_string, get_matches=True, get_data=False, get_terms=True, get_size=True, partial=partial, search=search, offset=offset, limit=limit, order_by=order_by)
+        query = search_parser(search if isinstance(search, dict) else 'TERMS ' + search)
+        del query['facets']
+        if terms is not None:
+            query['terms'] = terms
+        if partials is not None:
+            query['partials'] = partials
+        if offset is not None:
+            query['first'] = offset
+        if limit is not None:
+            query['maxitems'] = limit
+        if order_by is not None:
+            query['sort_by'] = order_by
+        search = self._search(query, get_matches=True, get_data=False, get_terms=True, get_size=True)
         for result in search.results:
             yield result
 
-    def find(self, query_string=None, facets=None, terms=None, partial=None, search=None, offset=None, limit=None, order_by=None):
+    def find(self, search=None, facets=None, terms=None, partials=None, offset=None, limit=None, order_by=None):
         self._check_db()
-        search = self._search(query_string, get_matches=True, get_data=False, get_terms=False, get_size=True, facets=facets, terms=terms, partial=partial, search=search, offset=offset, limit=limit, order_by=order_by)
+        query = search_parser(search)
+        if facets is not None:
+            query['facets'] = facets
+        if terms is not None:
+            query['terms'] = terms
+        if partials is not None:
+            query['partials'] = partials
+        if offset is not None:
+            query['first'] = offset
+        if limit is not None:
+            query['maxitems'] = limit
+        if order_by is not None:
+            query['sort_by'] = order_by
+        search = self._search(query, get_matches=True, get_data=False, get_terms=False, get_size=True)
         for result in search.results:
             yield result
 
-    def search(self, query_string=None, facets=None, terms=None, partial=None, search=None, offset=None, limit=None, order_by=None):
+    def search(self, search=None, facets=None, terms=None, partials=None, offset=None, limit=None, order_by=None):
         self._check_db()
-        search = self._search(query_string, get_matches=True, get_data=True, get_terms=False, get_size=True, facets=facets, terms=terms, partial=partial, search=search, offset=offset, limit=limit, order_by=order_by)
+        query = search_parser(search)
+        if facets is not None:
+            query['facets'] = facets
+        if terms is not None:
+            query['terms'] = terms
+        if partials is not None:
+            query['partials'] = partials
+        if offset is not None:
+            query['first'] = offset
+        if limit is not None:
+            query['maxitems'] = limit
+        if order_by is not None:
+            query['sort_by'] = order_by
+        search = self._search(query, get_matches=True, get_data=True, get_terms=False, get_size=True)
         for result in search.results:
             yield result
 
-    def count(self, query_string=None, partial=None, search=None):
-        if query_string:
-            search = self._search(query_string, get_matches=False, get_data=False, get_terms=False, get_size=True, partial=partial, search=search)
-            return search.size
+    def count(self, search=None, terms=None, partials=None):
+        if search or terms or partials:
+            query = search_parser(search)
+            del query['facets']
+            if terms is not None:
+                query['terms'] = terms
+            if partials is not None:
+                query['partials'] = partials
+            del query['first']
+            query['maxitems'] = 0
+            del query['sort_by']
+            search = self._search(query, get_matches=False, get_data=False, get_terms=False, get_size=True)
+            return search.estimated
         else:
             database = self._get_database()
             return database.get_doccount()

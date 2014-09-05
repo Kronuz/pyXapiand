@@ -10,6 +10,8 @@ from .core import xapian_reopen, get_slot
 from .serialise import normalize
 from .exceptions import XapianError
 
+MAX_DOCS = 10000
+
 
 class Search(object):
     def __init__(self, database, obj,
@@ -103,9 +105,9 @@ class Search(object):
         self.database = database
         self.query = query
         self.facets = obj.get('facets')
-        self.check_at_least = obj.get('check_at_least')
-        self.maxitems = obj.get('maxitems')
-        self.first = obj.get('first')
+        self.check_at_least = obj.get('check_at_least', MAX_DOCS)
+        self.maxitems = obj.get('maxitems', MAX_DOCS)
+        self.first = obj.get('first', 0)
         self.sort_by = obj.get('sort_by')
         self.sort_by_reversed = obj.get('sort_by_reversed')
 
@@ -163,8 +165,8 @@ class Search(object):
             self.database = xapian_reopen(self.database, data=self.data, log=self.log)
             doccount = self.database.get_doccount()
 
-        maxitems = max(min(self.maxitems, doccount - self.first, 10000), 0)
-        check_at_least = max(min(self.check_at_least, doccount, 10000), 0)
+        maxitems = max(min(self.maxitems, doccount - self.first, MAX_DOCS), 0)
+        check_at_least = max(min(self.check_at_least, doccount, MAX_DOCS), 0)
 
         if not self.get_matches:
             maxitems = 0
@@ -180,12 +182,13 @@ class Search(object):
             except (xapian.NetworkError, xapian.DatabaseError) as e:
                 raise XapianError(e)
 
+        self.estimated = None
         self.size = matches.size()
-
         if self.get_size:
+            self.estimated = matches.get_matches_estimated()
             yield {
                 'size': self.size,
-                'estimated': matches.get_matches_estimated(),
+                'estimated': self.estimated,
             }
 
         if self.spies:
