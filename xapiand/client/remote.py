@@ -9,6 +9,12 @@ from .connection import Connection, ServerPool, command
 
 
 class XapianConnection(Connection):
+    def get_name(self):
+        if self.endpoints:
+            return " ".join(self.endpoints)
+        else:
+            return ""
+
     def on_connect(self):
         endpoints = getattr(self.context, 'endpoints', None)
         if endpoints:

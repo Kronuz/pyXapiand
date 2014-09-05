@@ -23,6 +23,24 @@ from ..exceptions import ConnectionError
 EMPTY_SLOT = (sys.maxint, None)
 
 
+def log_command(func):
+    @wraps(func)
+    def wrapped(self, command_name, *args):
+        start = time.time()
+        try:
+            return func(self, command_name, *args)
+        finally:
+            stop = time.time()
+            self.pool.queries.setdefault(self.get_name(), []).append({
+                'command_name': command_name,
+                'additional_args': args,
+                'time': "%.3f s" % (stop - start),
+                'start': start,
+                'stop': stop,
+            })
+    return wrapped
+
+
 def command(threaded=False, **kwargs):
     def _command(func):
         func.command = func.__name__
@@ -142,10 +160,11 @@ class Connection(object):
     MAX_READ_LENGTH = 1000000
     delimiter = '\r\n'
 
-    def __init__(self, host='localhost', port=1234, endpoints=None,
+    def __init__(self, pool, host='localhost', port=1234, endpoints=None,
                  max_connect_retries=5, reconnect_delay=0.5,
                  socket_timeout=None, encoding='utf-8',
                  encoding_errors='strict'):
+        self.pool = pool
         self.host = host
         self.port = port
         self.endpoints = endpoints
@@ -298,6 +317,7 @@ class Connection(object):
     def pack_command(self, *args):
         return "%s%s" % (" ".join(a for a in args if a), self.delimiter)
 
+    # @log_command
     @with_retry
     def execute_command(self, command_name, *args):
         command = self.pack_command(command_name, *args)
@@ -307,9 +327,9 @@ class Connection(object):
 
 
 class ServerPool(object):
-    connection_class = Connection
-
     def __init__(self, server, max_retries=3, max_pool_size=35, socket_timeout=4, blacklist_time=60):
+        self.queries = {}
+
         self.max_retries = max_retries
         self.max_pool_size = max_pool_size
         self.socket_timeout = socket_timeout
@@ -383,7 +403,7 @@ class ServerPool(object):
 
         while server is not None:
             host, _, port = server.partition(':')
-            connection = self.connection_class(host=host, port=int(port), socket_timeout=self.socket_timeout)
+            connection = self.connection_class(self, host=host, port=int(port), socket_timeout=self.socket_timeout)
             connection.context = context
             try:
                 connection.connect()
