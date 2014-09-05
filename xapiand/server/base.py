@@ -2,6 +2,7 @@ from __future__ import unicode_literals, absolute_import
 
 import time
 import threading
+import logging
 
 from functools import wraps
 
@@ -39,7 +40,7 @@ def command(threaded=False, **kwargs):
 class ClientReceiver(object):
     delimiter = b'\r\n'
 
-    def __init__(self, server, client_socket, address, log=None,
+    def __init__(self, server, client_socket, address, log=logging,
                  encoding='utf-8', encoding_errors='strict'):
         self.log = log
         self.server = server

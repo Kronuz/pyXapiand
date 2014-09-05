@@ -15,7 +15,6 @@ except ImportError:
     import pickle
 
 import logging
-logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -34,9 +33,9 @@ class FileQueue(object):
     bucket_size = 10 * 1024 * 1024  # 10MB
     sync_age = 500
 
-    def __init__(self, name=None, log=None):
+    def __init__(self, name=None, log=logging):
         self.name = name
-        self.log = log or logger
+        self.log = log
 
         self.sem = multiprocessing.Semaphore()
         self.lock = multiprocessing.RLock()

@@ -12,7 +12,6 @@ from redis.exceptions import ConnectionError
 from contextlib import contextmanager
 
 import logging
-logger = logging.getLogger(__name__)
 
 DEFAULT_HOST = '127.0.0.1'
 DEFAULT_PORT = 6379
@@ -32,7 +31,7 @@ class RedisQueue(object):
     _lock = threading.RLock()
     socket_timeout = None
 
-    def __init__(self, name=None, log=None):
+    def __init__(self, name=None, log=logging):
         if redis.VERSION < (2, 4, 4):
             raise VersionMismatch(
                 'Redis transport requires redis-py versions 2.4.4 or later. '
@@ -40,7 +39,7 @@ class RedisQueue(object):
 
         self.names = ()
         self.add(name)
-        self.logger = log or logger
+        self.logger = log
 
     def add(self, name):
         if not hasattr(name, '__iter__'):

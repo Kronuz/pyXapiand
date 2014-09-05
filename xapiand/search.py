@@ -1,6 +1,7 @@
 from __future__ import unicode_literals, absolute_import
 
 import base64
+import logging
 
 import xapian
 
@@ -13,7 +14,7 @@ from .exceptions import XapianError
 class Search(object):
     def __init__(self, database, obj,
                  get_matches=True, get_data=True, get_terms=False, get_size=False,
-                 data='.', log=None):
+                 data='.', log=logging):
         self.log = log
         self.data = data
         self.get_matches = get_matches
