@@ -313,9 +313,10 @@ class Connection(object):
                         continue
                     _cmd_id = int(_cmd_id)
                     if _cmd_id != cmd_id:
-                        if _cmd_id > cmd_id:
-                            return
-                        continue
+                        if _cmd_id < cmd_id:
+                            continue
+                        self.disconnect()
+                        raise ConnectionError("Old command handler read a newer message sequence!")
                     response = response.decode(self.encoding, self.encoding_errors)
                 return response
             except (socket.error, socket.timeout):
