@@ -278,9 +278,8 @@ class Connection(object):
             raise
 
     def read(self, length=None):
-        cmd_id = b"%s. " % self.cmd_id
-        cmd_id_len = len(cmd_id)
         "Read the response from a previously sent command"
+        cmd_id = self.cmd_id
         while True:
             try:
                 if length is not None:
@@ -306,11 +305,18 @@ class Connection(object):
                     response = self._file.readline()[:-2]
                 # print '--->>>>', repr(response)
                 if response:
-                    if response[0] in ("#", " "):
+                    if response[0] in (b"#", b" "):
                         continue
-                    if not response.startswith(cmd_id):
+                    try:
+                        _cmd_id, _, response = response.partition(b'. ')
+                    except ValueError:
                         continue
-                    response = response[cmd_id_len:].decode(self.encoding, self.encoding_errors)
+                    _cmd_id = int(_cmd_id)
+                    if _cmd_id != cmd_id:
+                        if _cmd_id > cmd_id:
+                            return
+                        continue
+                    response = response.decode(self.encoding, self.encoding_errors)
                 return response
             except (socket.error, socket.timeout):
                 self.disconnect()
