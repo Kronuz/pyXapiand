@@ -30,6 +30,12 @@ except ImportError:
 from .fqueue import FileQueue
 from .memory import MemoryQueue
 
+AVAILABLE_QUEUES = {
+    'file': FileQueue,
+    'redis': RedisQueue or MemoryQueue,
+    'memory': MemoryQueue,
+    None: MemoryQueue,
+}
 
 import logging
 
@@ -43,8 +49,8 @@ QUEUE_WORKER_MAIN = 'Xapian-Worker'
 QUEUE_WORKER_THREAD = 'Xapian-%s'
 
 g_tl = threading.local()
-main_queue = queue.Queue()
-queues = {}
+MAIN_QUEUE = queue.Queue()
+QUEUES = {}
 PQueue = None
 
 
@@ -270,7 +276,7 @@ class XapianReceiver(CommandReceiver):
         while self._do_init:
             endpoints = self._do_init.pop()
             if endpoints not in self._inited:
-                _xapian_init(endpoints, queue=main_queue, data=self.data, log=self.log)
+                _xapian_init(endpoints, queue=MAIN_QUEUE, data=self.data, log=self.log)
                 self._inited.add(endpoints)
 
     def _delete(self, line, commit):
@@ -377,7 +383,7 @@ class XapianServer(CommandServer):
 
 
 def get_queue(name, log=logging):
-    return queues.setdefault(name, PQueue(name=name, log=log))
+    return QUEUES.setdefault(name, PQueue(name=name, log=log))
 
 
 def _flush_queue(queue):
@@ -579,15 +585,15 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
     timeout = min(max(int(round(commit_timeout * 0.3)), 1), 3)
 
     commit_slots = commit_slots or multiprocessing.cpu_count()
-    if queue == 'redis' and RedisQueue:
-        PQueue = RedisQueue
-    elif queue == 'file':
-        PQueue = FileQueue
-    else:
-        PQueue = MemoryQueue
-    mode = "with multiple threads and %s commit slots using %s" % (commit_slots, PQueue.__name__)
 
+    PQueue = AVAILABLE_QUEUES.get(queue) or AVAILABLE_QUEUES[None]
+    mode = "with multiple threads and %s commit slots using %s" % (commit_slots, PQueue.__name__)
     log.warning("Starting Xapiand %s %s [%s] (pid:%s)", version, mode, loglevel, os.getpid())
+
+    if ':' in port:
+        listen = port
+    else:
+        listen = ':%s' % port
 
     commit_lock = threading.Semaphore(commit_slots)
     timeouts = Obj(
@@ -601,9 +607,7 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
     databases = {}
     to_commit = {}
 
-    if ':' not in port:
-        port = ':%s' % port
-    server = XapianServer(port, databases=databases, data=data, log=log)
+    server = XapianServer(listen, databases=databases, data=data, log=log)
 
     def _server_stop(sig=None):
         global STOPPED
@@ -670,7 +674,7 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
     while not STOPPED:
         _database_commit(databases_pool, to_commit, commit_lock, timeouts, data=data, log=log)
         try:
-            msg = main_queue.get(True, timeout)
+            msg = MAIN_QUEUE.get(True, timeout)
         except Queue.Empty:
             try:
                 msg = pq.get(False)
