@@ -187,6 +187,7 @@ class Search(object):
             except (xapian.NetworkError, xapian.DatabaseError) as e:
                 raise XapianError(e)
 
+        self.produced = 0
         self.estimated = None
         self.size = matches.size()
         if self.get_size:

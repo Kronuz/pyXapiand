@@ -22,7 +22,7 @@ class Xapian(object):
 
     def _check_db(self):
         if not self.endpoints:
-            raise XapianError("Select a database with the command USING")
+            raise XapianError("Select a database with the command OPEN")
 
     def _get_database(self, create=False, endpoints=None):
         endpoints = endpoints or self.endpoints
@@ -49,14 +49,21 @@ class Xapian(object):
         else:
             raise XapianError("You must specify a valid endpoint for the database")
 
-    def using(self, endpoints=None):
+    def open(self, endpoints=None):
         if endpoints:
             assert isinstance(endpoints, (list, tuple)), "Endpoints must be a tuple"
             endpoints = tuple(endpoints)
             self._reopen(create=False, endpoints=endpoints)
             self.endpoints = endpoints
         self._check_db()
-    open = using
+
+    def using(self, endpoints=None):
+        if endpoints:
+            assert isinstance(endpoints, (list, tuple)), "Endpoints must be a tuple"
+            endpoints = tuple(endpoints)
+            self._reopen(create=True, endpoints=endpoints)
+            self.endpoints = endpoints
+        self._check_db()
 
     def _search(self, query, get_matches, get_data, get_terms, get_size):
         database = self._get_database()

@@ -17,7 +17,7 @@ from .. import version, json
 from ..exceptions import InvalidIndexError, XapianError
 from ..core import xapian_database, xapian_commit, xapian_index, xapian_delete
 from ..platforms import create_pidlock
-from ..utils import parse_url, build_url
+from ..utils import parse_url, build_url, format_time
 from ..parser import index_parser, search_parser
 from ..search import Search
 
@@ -72,13 +72,13 @@ class XapianReceiver(CommandReceiver):
         self.endpoints = None
         self.data = data
 
-    def dispatch(self, func, line):
+    def dispatch(self, func, line, command):
         if getattr(func, 'db', False) and not self.endpoints:
             self.sendLine(">> ERR: %s" % "You must connect to a database first")
             return
         if getattr(func, 'reopen', False) and self._do_reopen:
             self._reopen()
-        super(XapianReceiver, self).dispatch(func, line)
+        super(XapianReceiver, self).dispatch(func, line, command)
 
     def _get_database(self, create=False, endpoints=None):
         endpoints = endpoints or self.endpoints
@@ -99,6 +99,7 @@ class XapianReceiver(CommandReceiver):
 
         """
         self.sendLine(">> OK: %s" % version)
+        return version
     ver = version
 
     @command(db=True)
@@ -139,14 +140,16 @@ class XapianReceiver(CommandReceiver):
             self.sendLine(">> ERR: [405] You must specify a valid endpoint for the database")
 
     @command
-    def using(self, line=''):
+    def open(self, line=''):
         """
-        Start using the specified endpoint(s).
+        Open the specified endpoint(s).
 
         Local paths as well as remote databases are allowed as endpoints.
         More than one endpoint can be specified, separated by spaces.
 
-        Usage: USING <endpoint> [endpoint ...]
+        Usage: OPEN <endpoint> [endpoint ...]
+
+        See also: CREATE, USING
 
         """
         endpoints = line
@@ -161,14 +164,39 @@ class XapianReceiver(CommandReceiver):
         if self.endpoints:
             self.sendLine(">> OK")
         else:
-            self.sendLine(">> ERR: [405] Select a database with the command USING")
-    open = using
+            self.sendLine(">> ERR: [405] Select a database with the command OPEN")
 
-    def _search(self, query, get_matches, get_data, get_terms, get_size, dead):
+    @command
+    def using(self, line=''):
+        """
+        Start using the specified endpoint(s).
+
+        Like OPEN, but if the database doesn't exist, it creates it.
+
+        Usage: USING <endpoint> [endpoint ...]
+
+        See also: OPEN
+
+        """
+        endpoints = line
+        if endpoints:
+            endpoints = tuple(endpoints.split())
+            try:
+                self._reopen(create=True, endpoints=endpoints)
+                self.endpoints = endpoints
+            except InvalidIndexError as e:
+                self.sendLine(">> ERR: Using: %s" % e)
+                return
+        if self.endpoints:
+            self.sendLine(">> OK")
+        else:
+            self.sendLine(">> ERR: [405] Select a database with the command OPEN")
+
+    def _search(self, query, get_matches, get_data, get_terms, get_size, dead, counting=False):
         try:
             database = self._get_database()
         except InvalidIndexError as e:
-            self.sendLine(">> ERR: Search: %s" % e)
+            self.sendLine(">> ERR: %s" % e)
             return
 
         start = time.time()
@@ -184,18 +212,24 @@ class XapianReceiver(CommandReceiver):
             log=self.log,
             dead=dead)
 
-        try:
-            for result in search.results:
-                self.sendLine(json.dumps(result, ensure_ascii=False))
-        except XapianError as e:
-            self.sendLine(">> ERR: Unable to get results: %s" % e)
-            return
+        if counting:
+            search.get_results().next()
+            size = search.estimated
+        else:
+            try:
+                for result in search.results:
+                    self.sendLine(json.dumps(result, ensure_ascii=False))
+            except XapianError as e:
+                self.sendLine(">> ERR: Unable to get results: %s" % e)
+                return
 
-        self.sendLine("# DEBUG: Parsed query was: %s" % search.query)
-        for warning in search.warnings:
-            self.sendLine("# WARNING: %s" % warning)
-        size = search.size
-        self.sendLine(">> OK: %s documents found in %sms" % (size, 1000.00 * (time.time() - start)))
+            self.sendLine("# DEBUG: Parsed query was: %s" % search.query)
+            for warning in search.warnings:
+                self.sendLine("# WARNING: %s" % warning)
+            size = search.size
+
+        self.sendLine(">> OK: %s documents found in %s" % (size, format_time(time.time() - start)))
+        return size
 
     @command(threaded=True, db=True, reopen=True)
     def facets(self, line, dead):
@@ -205,7 +239,7 @@ class XapianReceiver(CommandReceiver):
         del query['first']
         query['maxitems'] = 0
         del query['sort_by']
-        self._search(query, get_matches=False, get_data=False, get_terms=False, get_size=False, dead=dead)
+        return self._search(query, get_matches=False, get_data=False, get_terms=False, get_size=False, dead=dead)
     facets.__doc__ = """
     Finds and lists the facets of a query.
 
@@ -216,7 +250,7 @@ class XapianReceiver(CommandReceiver):
     def terms(self, line, dead):
         query = search_parser(line)
         del query['facets']
-        self._search(query, get_matches=True, get_data=False, get_terms=True, get_size=True, dead=dead)
+        return self._search(query, get_matches=True, get_data=False, get_terms=True, get_size=True, dead=dead)
     terms.__doc__ = """
     Finds and lists the terms of the documents.
 
@@ -226,7 +260,7 @@ class XapianReceiver(CommandReceiver):
     @command(threaded=True, db=True, reopen=True)
     def find(self, line, dead):
         query = search_parser(line)
-        self._search(query, get_matches=True, get_data=False, get_terms=False, get_size=True, dead=dead)
+        return self._search(query, get_matches=True, get_data=False, get_terms=False, get_size=True, dead=dead)
     find.__doc__ = """
     Finds documents.
 
@@ -236,7 +270,7 @@ class XapianReceiver(CommandReceiver):
     @command(threaded=True, db=True, reopen=True)
     def search(self, line, dead):
         query = search_parser(line)
-        self._search(query, get_matches=True, get_data=True, get_terms=False, get_size=True, dead=dead)
+        return self._search(query, get_matches=True, get_data=True, get_terms=False, get_size=True, dead=dead)
     search.__doc__ = """
     Search documents.
 
@@ -252,7 +286,7 @@ class XapianReceiver(CommandReceiver):
             del query['first']
             query['maxitems'] = 0
             del query['sort_by']
-            self._search(query, get_matches=False, get_data=False, get_terms=False, get_size=True)
+            size = self._search(query, get_matches=False, get_data=False, get_terms=False, get_size=True, dead=False, counting=True)  # dead is False because command it's not threaded
         else:
             try:
                 database = self._get_database()
@@ -260,7 +294,8 @@ class XapianReceiver(CommandReceiver):
                 self.sendLine(">> ERR: Count: %s" % e)
                 return
             size = database.get_doccount()
-            self.sendLine(">> OK: %s documents found in %sms" % (size, 1000.00 * (time.time() - start)))
+            self.sendLine(">> OK: %s documents found in %s" % (size, format_time(time.time() - start)))
+        return size
     count.__doc__ = """
     Counts matching documents.
 
@@ -359,7 +394,14 @@ class XapianReceiver(CommandReceiver):
 
     @command
     def databases(self, line=''):
-        self.sendLine(">> OK: %s" % " ".join(db for db in self.server.databases))
+        for db in self.server.databases:
+            self.sendLine(json.dumps({
+                'id': _database_name(db),
+                'url': db,
+            }))
+        size = len(self.server.databases)
+        self.sendLine(">> OK: %d active databases" % size)
+        return size
 
 
 class XapianServer(CommandServer):
@@ -427,7 +469,7 @@ def _database_command(databases_pool, cmd, db, args, data='.', log=logging):
         raise
     duration = time.time() - start
     docid = ' -> %s' % docid if docid else ''
-    log.debug("Executed %s %s(%s)%s (%s) ~ %0.3f s", "unknown command" if unknown else "command", cmd, arg, docid, db, duration)
+    log.debug("Executed %s %s(%s)%s (%s) ~ %s", "unknown command" if unknown else "command", cmd, arg, docid, db, format_time(duration))
     return db if cmd in ('INDEX', 'DELETE') else None  # Return db if it needs to be committed.
 
 

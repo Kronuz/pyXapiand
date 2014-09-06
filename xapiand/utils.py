@@ -1,4 +1,4 @@
-from __future__ import unicode_literals, absolute_import
+from __future__ import unicode_literals, absolute_import, division
 
 import re
 import datetime
@@ -122,3 +122,33 @@ def isoparse(ds):
                     except:
                         dt = datetime.datetime.strptime(ds[:10], '%Y-%m-%d')
     return dt
+
+
+def format_time(timespan, precision=3):
+    """Formats the timespan in a human readable form"""
+    import math
+
+    if timespan >= 60.0:
+        # we have more than a minute, format that in a human readable form
+        # Idea from http://snipplr.com/view/5713/
+        parts = [("d", 60 * 60 * 24), ("h", 60 * 60), ("min", 60), ("s", 1)]
+        time = []
+        leftover = timespan
+        for suffix, length in parts:
+            value = int(leftover / length)
+            if value > 0:
+                leftover = leftover % length
+                time.append(u'%s%s' % (str(value), suffix))
+            if leftover < 1:
+                break
+        return " ".join(time)
+
+    units = ["s", "ms", '\xb5s', "ns"]  # the save value
+    scaling = [1, 1e3, 1e6, 1e9]
+
+    if timespan > 0.0:
+        order = min(-int(math.floor(math.log10(timespan)) // 3), 3)
+    else:
+        order = 3
+    ret = "%.*g %s" % (precision, timespan * scaling[order], units[order])
+    return ret

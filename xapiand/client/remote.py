@@ -36,6 +36,16 @@ class XapianConnection(Connection):
         return response
 
     @command
+    def open(self, endpoints=None):
+        if endpoints:
+            assert isinstance(endpoints, (list, tuple)), "Endpoints must be a tuple"
+            response = self._response(self.execute_command('OPEN', ','.join(endpoints)))
+            self.context.endpoints = endpoints
+        else:
+            response = self._response(self.execute_command('OPEN'))
+        return response
+
+    @command
     def using(self, endpoints=None):
         if endpoints:
             assert isinstance(endpoints, (list, tuple)), "Endpoints must be a tuple"

@@ -10,13 +10,16 @@ from gevent import socket
 from gevent.server import StreamServer
 from gevent.threadpool import ThreadPool
 
+from ..utils import format_time
+
 
 class QuitCommand(Exception):
     pass
 
 
 class DeadException(Exception):
-    pass
+    def __init__(self, command):
+        self.command = command
 
 
 class AliveCommand(object):
@@ -25,15 +28,50 @@ class AliveCommand(object):
     as it was when the object was created.
 
     """
-    def __init__(self, obj):
-        obj.cmd_id = getattr(obj, 'cmd_id', 0) + 1
-        self.obj = obj
-        self.cmd_id = obj.cmd_id
+    cmds_duration = 0
+    cmds_start = 0
+    cmds_count = 0
+
+    def __init__(self, parent, cmd, origin):
+        parent.cmd_id = getattr(parent, 'cmd_id', 0) + 1
+        self.parent = parent
+        self.cmd_id = parent.cmd_id
+        self.cmd = cmd
+        self.origin = origin
+        self.log = parent.log
+        self.start = time.time()
 
     def __nonzero__(self):
-        if self.cmd_id == self.obj.cmd_id:
+        if self.cmd_id == self.parent.cmd_id:
             return False
-        raise DeadException
+        raise DeadException(self)
+
+    def executed(self, results, message="Executed command %d", logger=None):
+        if logger is None:
+            logger = self.log.debug
+        now = time.time()
+        cmd_duration = now - self.start
+        AliveCommand.cmds_duration += cmd_duration
+        AliveCommand.cmds_count += 1
+        logger(
+            "%s from %s %s%s ~ %s (%0.3f cps)",
+            message % self.cmd_id,
+            self.origin,
+            self.cmd,
+            " -> %s" % results if results is not None else "",
+            format_time(cmd_duration),
+            AliveCommand.cmds_count / AliveCommand.cmds_duration,
+        )
+        if now - AliveCommand.cmds_start > 2 or AliveCommand.cmds_count >= 10000:
+            AliveCommand.cmds_start = now
+            AliveCommand.cmds_duration = 0
+            AliveCommand.cmds_count = 0
+
+    def cancelled(self):
+        self.executed(message="Command %d cancelled", logger=self.log.warning)
+
+    def error(self, e):
+        self.executed(e, message="Command %d ERROR", logger=self.log.error)
 
 
 def command(threaded=False, **kwargs):
@@ -44,16 +82,16 @@ def command(threaded=False, **kwargs):
             setattr(func, attr, value)
         if threaded:
             @wraps(func)
-            def wrapped(self, _sock, *args, **kwargs):
+            def wrapped(self, command, _sock, *args, **kwargs):
                 client_socket = socket.socket(_sock=_sock)  # Create a gevent socket from the raw socket
                 self.client_socket = client_socket
                 self.socket_file = client_socket.makefile()
                 try:
-                    return func(self, *args, **kwargs)
+                    command.executed(func(self, *args, **kwargs))
                 except (IOError, RuntimeError, socket.error) as e:
-                    self.log.error("Command %s error: %s", func.command, e)
+                    command.error(e)
                 except DeadException:
-                    self.log.warning("Command %s was cancelled!", func.command)
+                    command.cancelled()
             return wrapped
         else:
             return func
@@ -113,12 +151,16 @@ class ClientReceiver(object):
                 break
             line = self.readline()
 
-    def dispatch(self, func, line):
-        dead = AliveCommand(self)
+    def dispatch(self, func, line, command):
         if func.threaded:
-            self.server.pool.spawn(func, self.client_socket._sock, line, dead)
+            self.server.pool.spawn(func, command, self.client_socket._sock, line, command)
         else:
-            func(line)
+            try:
+                command.executed(func(line))
+            except (IOError, RuntimeError, socket.error) as e:
+                command.error(e)
+            except DeadException:
+                command.cancelled()
 
     def connectionMade(self):
         pass
@@ -177,13 +219,6 @@ class CommandServer(StreamServer):
 class CommandReceiver(ClientReceiver):
     welcome = "# Welcome to the server! Type quit to exit."
 
-    def __init__(self, *args, **kwargs):
-        super(CommandReceiver, self).__init__(*args, **kwargs)
-        self.cmd = None
-        self.cmd_duration = 0
-        self.cmd_start = 0
-        self.cmd_count = 0
-
     def connectionMade(self):
         self.log.info("New connection from %s:%d (%d open connections)" % (self.address[0], self.address[1], len(self.server.clients)))
         if self.welcome:
@@ -199,7 +234,6 @@ class CommandReceiver(ClientReceiver):
         line = line.strip()
         if not cmd:
             return
-        start = time.time()
         try:
             func = getattr(self, cmd)
             if not func.command:
@@ -207,19 +241,8 @@ class CommandReceiver(ClientReceiver):
         except AttributeError:
             self.sendLine(">> ERR: [404] Unknown command: %s" % cmd.upper())
         else:
-            self.dispatch(func, line)
-            now = time.time()
-            self.cmd_duration += now - start
-            self.cmd_count += 1
-            self.cmd = cmd
-            if now - self.cmd_start > 2 or self.cmd_count >= 10000:
-                if self.cmd_count == 1:
-                    self.log.debug("Executed command %s from %s:%d ~ %0.3f s", self.cmd.upper(), self.address[0], self.address[1], self.cmd_duration)
-                else:
-                    self.log.info("Executed %s commands from %s:%d ~ %0.3f s (%0.3f cps)", self.cmd_count, self.address[0], self.address[1], self.cmd_duration, self.cmd_count / self.cmd_duration)
-                self.cmd_start = now
-                self.cmd_duration = 0
-                self.cmd_count = 0
+            command = AliveCommand(self, cmd=cmd.upper(), origin="%s:%d" % (self.address[0], self.address[1]))
+            self.dispatch(func, line, command)
 
     @command
     def quit(self, line):
