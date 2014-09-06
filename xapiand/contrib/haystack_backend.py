@@ -96,13 +96,7 @@ class XapianSearchBackend(BaseSearchBackend):
             raise ImproperlyConfigured("You must specify 'PATH' in your settings for connection '%s'." % connection_alias)
 
         self.language = language or getattr(settings, 'HAYSTACK_XAPIAN_LANGUAGE', 'english')
-        try:
-            self.xapian = Xapian('localhost:8890', using=self.endpoints)
-        except XapianError:
-            self.xapian = Xapian('localhost:8890')
-            for endpoint in self.endpoints:
-                self.xapian.create(endpoint)
-            self.xapian.using(self.endpoints)
+        self.xapian = Xapian(HAYSTACK_XAPIAN_SERVERS, using=self.endpoints)
 
     def updater(self, index, obj, commit):
         data = index.full_prepare(obj)
