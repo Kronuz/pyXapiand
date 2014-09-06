@@ -188,6 +188,9 @@ class Xapian(ServerPool):
 
     def __init__(self, *args, **kwargs):
         using = kwargs.pop('using', None)
+        open_ = kwargs.pop('open', None)
         super(Xapian, self).__init__(*args, **kwargs)
         if using:
             self.using(using)
+        elif open_:
+            self.open(open_)

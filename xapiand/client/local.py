@@ -17,8 +17,11 @@ class Xapian(object):
         self.data = kwargs.pop('data', '.')
         self.log = kwargs.pop('log', logging)
         using = kwargs.pop('using', None)
+        open_ = kwargs.pop('open', None)
         if using:
             self.using(using)
+        elif open_:
+            self.open(open_)
 
     def _check_db(self):
         if not self.endpoints:
