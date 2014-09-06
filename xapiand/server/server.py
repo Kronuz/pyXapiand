@@ -17,11 +17,12 @@ from .. import version, json
 from ..exceptions import InvalidIndexError, XapianError
 from ..core import xapian_database, xapian_commit, xapian_index, xapian_delete
 from ..platforms import create_pidlock
-from ..utils import colored_logging, parse_url, build_url
+from ..utils import parse_url, build_url
 from ..parser import index_parser, search_parser
 from ..search import Search
 
 from .base import CommandReceiver, CommandServer, command
+from .logging import QueueHandler, ColoredStreamHandler
 try:
     from .redis import RedisQueue
 except ImportError:
@@ -31,9 +32,6 @@ from .memory import MemoryQueue
 
 
 import logging
-colored_logging(logging)
-logger = logging.getLogger(__name__)
-
 
 LOG_FORMAT = "[%(asctime)s: %(levelname)s/%(processName)s:%(threadName)s] %(message)s"
 
@@ -531,33 +529,55 @@ def _thread_loop(databases_pool, db, tq, commit_lock, timeouts, data, log):
     log.debug("Worker thread %s ended! (%s)", name, db)
 
 
+def logging_run(loglevel, logfile, pidfile, log_queue):
+    logger = logging.getLogger()
+    logger.setLevel(loglevel)
+    if len(logger.handlers) < 1:
+        formatter = logging.Formatter(LOG_FORMAT)
+        if logfile:
+            outfile = logging.FileHandler(logfile)
+            outfile.setFormatter(formatter)
+            logger.addHandler(outfile)
+        if not pidfile:
+            console = ColoredStreamHandler(sys.stderr)
+            console.setFormatter(formatter)
+            logger.addHandler(console)
+
+    while True:
+        try:
+            record = log_queue.get()
+            if record is None:  # We send this as a sentinel to tell the listener to quit.
+                break
+            logger.handle(record)  # No level or filter logic applied - just do it!
+        except (KeyboardInterrupt, SystemExit):
+            continue
+        except:
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+
+
 def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=0,
                working_directory=None, verbosity=2, commit_slots=None, commit_timeout=None,
                port=None, queue=None, **options):
     global PQueue, STOPPED
 
-    log = logger
+    loglevel = ['ERROR', 'WARNING', 'INFO', 'DEBUG'][3 if verbosity == 'v' else int(verbosity)]
+
+    log_queue = multiprocessing.Queue()
+    logging_job = multiprocessing.Process(target=logging_run, args=(loglevel, logfile, pidfile, log_queue))
+    logging_job.start()
+
+    log = logging.getLogger()
+    log.addHandler(QueueHandler(log_queue))
+    log.setLevel(loglevel)
 
     if pidfile:
         create_pidlock(pidfile)
-    if len(log.handlers) < 1:
-        formatter = logging.Formatter(LOG_FORMAT)
-        if logfile:
-            outfile = logging.FileHandler(logfile)
-            outfile.setFormatter(formatter)
-            log.addHandler(outfile)
-        if not pidfile:
-            console = logging.StreamHandler(sys.stderr)
-            console.setFormatter(formatter)
-            log.addHandler(console)
-    loglevel = ['ERROR', 'WARNING', 'INFO', 'DEBUG'][3 if verbosity == 'v' else int(verbosity)]
-    if not hasattr(logging, loglevel):
-        loglevel = 'INFO'
-    _loglevel = getattr(logging, loglevel)
-    log.setLevel(_loglevel)
+
     if commit_timeout is None:
         commit_timeout = COMMIT_TIMEOUT
     timeout = min(max(int(round(commit_timeout * 0.3)), 1), 3)
+
     commit_slots = commit_slots or multiprocessing.cpu_count()
     if queue == 'redis' and RedisQueue:
         PQueue = RedisQueue
@@ -706,3 +726,6 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
         t.join()
 
     log.warning("Xapiand ended! (pid:%s)", os.getpid())
+
+    log_queue.put_nowait(None)
+    logging_job.join()
