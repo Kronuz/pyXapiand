@@ -80,23 +80,17 @@ class XapianSearchBackend(BaseSearchBackend):
     def __init__(self, connection_alias, language=None, **connection_options):
         super(XapianSearchBackend, self).__init__(connection_alias, **connection_options)
 
-        self.endpoints = []
-        self.timeout = connection_options.get('TIMEOUT', 0)
+        endpoints = connection_options.get('ENDPOINTS', [])
+        if not isinstance(endpoints, (tuple, list)):
+            endpoints = [endpoints]
 
-        if 'PATH' in connection_options:
-            paths = connection_options['PATH']
-            prefix = connection_options.get('PREFIX', '')
-            if not isinstance(paths, (tuple, list)):
-                paths = [paths]
-            for path in paths:
-                path = os.path.join(prefix, path)
-                self.endpoints.append(path)
+        if not endpoints:
+            raise ImproperlyConfigured("You must specify 'ENDPOINTS' in your settings for connection '%s'." % connection_alias)
+        timeout = connection_options.get('TIMEOUT', None)
+        servers = connection_options.get('SERVERS', 'localhost:8890')
+        self.xapian = Xapian(servers, using=endpoints, socket_timeout=timeout)
 
-        if not self.endpoints:
-            raise ImproperlyConfigured("You must specify 'PATH' in your settings for connection '%s'." % connection_alias)
-
-        self.language = language or getattr(settings, 'HAYSTACK_XAPIAN_LANGUAGE', 'english')
-        self.xapian = Xapian(HAYSTACK_XAPIAN_SERVERS, using=self.endpoints)
+        self.language = language or connection_options.get('LANGUAGE', 'english')
 
     def updater(self, index, obj, commit):
         data = index.full_prepare(obj)
