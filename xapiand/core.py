@@ -120,6 +120,35 @@ def xapian_database(databases_pool, endpoints, writable, create=False, data='.',
     return database
 
 
+def xapian_close(database, data='.', log=logging):
+    databases_pool = database._databases_pool
+
+    # Could not be opened, try full reopen:
+    endpoints = database._endpoints
+    writable = isinstance(database, xapian.WritableDatabase)
+
+    # Remove database from pool
+    _database = databases_pool.pop((writable, endpoints), None)
+    assert not _database or _database == database
+    # ...and close.
+    if database:
+        database.close()
+
+    # Subdatabases cleanup:
+    for subdatabase in database._all_databases:
+        subdatabase_number = database._all_databases.index(subdatabase)
+        db, writable, create = database._all_databases_config[subdatabase_number]
+        scheme, hostname, port, username, password, path, query, query_dict = parse_url(db)
+        key = (scheme, hostname, port, username, password, path)
+
+        # Remove subdatabase from pool
+        _subdatabase = databases_pool.pop((writable, key), None)
+        assert not _subdatabase or _subdatabase == subdatabase
+        # ...and close (close on the main database should have already closed it anyway).
+        if subdatabase:
+            subdatabase.close()
+
+
 def xapian_reopen(database, data='.', log=logging):
     databases_pool = database._databases_pool
 
@@ -127,31 +156,12 @@ def xapian_reopen(database, data='.', log=logging):
         database.reopen()
     except (xapian.DatabaseOpeningError, xapian.NetworkError) as e:
         log.error("xapian_reopen database: %s", e)
+
         # Could not be opened, try full reopen:
+        xapian_close(database)
+
         endpoints = database._endpoints
         writable = isinstance(database, xapian.WritableDatabase)
-
-        # Remove database from pool
-        _database = databases_pool.pop((writable, endpoints), None)
-        assert not _database or _database == database
-        # ...and close.
-        if database:
-            database.close()
-
-        # Subdatabases cleanup:
-        for subdatabase in database._all_databases:
-            subdatabase_number = database._all_databases.index(subdatabase)
-            db, writable, create = database._all_databases_config[subdatabase_number]
-            scheme, hostname, port, username, password, path, query, query_dict = parse_url(db)
-            key = (scheme, hostname, port, username, password, path)
-
-            # Remove subdatabase from pool
-            _subdatabase = databases_pool.pop((writable, key), None)
-            assert not _subdatabase or _subdatabase == subdatabase
-            # ...and close (close on the main database should have already closed it anyway).
-            if subdatabase:
-                subdatabase.close()
-
         database, _ = _xapian_database(databases_pool, endpoints, writable, False, data=data, log=log)
 
     return database

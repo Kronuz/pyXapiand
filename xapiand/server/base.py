@@ -280,7 +280,7 @@ class CommandReceiver(ClientReceiver):
         cmd = line.strip().lower() or 'help'
         try:
             func = getattr(self, cmd)
-            if not func.command:
+            if not func.command or getattr(func, 'internal', False):
                 raise AttributeError
         except AttributeError:
             self.sendLine(">> ERR: [404] Unknown command: %s" % cmd)
@@ -292,7 +292,7 @@ class CommandReceiver(ClientReceiver):
                 for _cmd in dir(self):
                     _func = getattr(self, _cmd)
                     command = getattr(_func, 'command', None)
-                    if command:
+                    if command and getattr(_func, 'internal', False):
                         if command not in docs:
                             _help = self._help(_func, command)[0]
                             docs[command] = [_help, []]

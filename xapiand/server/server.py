@@ -15,7 +15,7 @@ from gevent import queue
 
 from .. import version, json
 from ..exceptions import InvalidIndexError, XapianError
-from ..core import xapian_database, xapian_commit, xapian_index, xapian_delete
+from ..core import xapian_database, xapian_close, xapian_commit, xapian_index, xapian_delete
 from ..platforms import create_pidlock
 from ..utils import parse_url, build_url, format_time
 from ..parser import index_parser, search_parser
@@ -321,6 +321,11 @@ class XapianReceiver(CommandReceiver):
         self.sendLine(">> OK")
         self._init()
 
+    @command(db=True, internal=True)
+    def init(self, line):
+        self._init()
+        self.sendLine(">> OK")
+
     @command(db=True)
     def delete(self, line):
         """
@@ -536,12 +541,16 @@ def _xapian_delete(db, document_id, commit=False, data='.', log=logging):
     _enqueue(('CDELETE' if commit else 'DELETE', (db,), (document_id,)), queue=queue, data=data, log=log)
 
 
-def _thread_loop(databases_pool, db, tq, commit_lock, timeouts, data, log):
+def _writer_loop(databases_pool, db, tq, commit_lock, timeouts, data, log):
     global STOPPED
     name = _database_name(db)
     to_commit = {}
 
-    log.debug("Worker thread %s started! (%s)", name, db)
+    start = time.time()
+    log.debug("New writer %s: %s", name, db)
+
+    # Open the database
+    database = xapian_database(databases_pool, (db,), True, True, data=data, log=log)
 
     msg = None
     timeout = timeouts.timeout
@@ -563,9 +572,10 @@ def _thread_loop(databases_pool, db, tq, commit_lock, timeouts, data, log):
         for _db in endpoints:
             _db = build_url(*parse_url(_db.strip()))
             if _db != db:
-                log.error("Thread received command for the wrong database!")
                 continue
+
             needs_commit = _database_command(databases_pool, cmd, db, args, data=data, log=log)
+
             if needs_commit:
                 now = time.time()
                 if needs_commit in to_commit:
@@ -574,7 +584,10 @@ def _thread_loop(databases_pool, db, tq, commit_lock, timeouts, data, log):
                     to_commit[needs_commit] = (now, now, now)
 
     _database_commit(databases_pool, to_commit, commit_lock, timeouts, force=True, data=data, log=log)
-    log.debug("Worker thread %s ended! (%s)", name, db)
+
+    xapian_close(database, data=data, log=log)
+
+    log.debug("Writer %s ended! ~ lived for %s", name, format_time(time.time() - start))
 
 
 def logging_run(loglevel, logfile, pidfile, log_queue):
@@ -686,6 +699,25 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
 
     pq = get_queue(name=QUEUE_WORKER_MAIN, log=log)
 
+    def start_writer(db, epfile):
+        db = build_url(*parse_url(db.strip()))
+        name = _database_name(db)
+        if db in databases:
+            t, tq = databases[db]
+        else:
+            tq = get_queue(name=os.path.join(data, name), log=log)
+            t = threading.Thread(
+                target=_writer_loop,
+                name=name[:14],
+                args=(databases_pool, db, tq, commit_lock, timeouts, data, log))
+            t.start()
+            databases[db] = (t, tq)
+            log.info("Endpoint added! (%s)", db)
+            if epfile:
+                epfile.write("%s\n" % db)
+                epfile.flush()
+        return db, name, t, tq
+
     # Initialize seen endpoints:
     endpoints = os.path.join(data, ENDPOINTS)
     try:
@@ -694,17 +726,7 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
     except IOError:
         epfile = None
     for db in epfile or []:
-        db = build_url(*parse_url(db.strip()))
-        name = _database_name(db)
-        if db not in databases:
-            tq = get_queue(name=os.path.join(data, name), log=log)
-            t = threading.Thread(
-                target=_thread_loop,
-                name=name[:14],
-                args=(databases_pool, db, tq, commit_lock, timeouts, data, log))
-            t.start()
-            databases[db] = (t, tq)
-            log.info("Endpoint added! (%s)", db)
+        start_writer(db, None)
     try:
         epfile = open(endpoints, 'at')
     except OSError:
@@ -731,22 +753,7 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
             continue
 
         for db in endpoints:
-            db = build_url(*parse_url(db.strip()))
-            name = _database_name(db)
-            if db in databases:
-                t, tq = databases[db]
-            else:
-                tq = get_queue(name=os.path.join(data, name), log=log)
-                t = threading.Thread(
-                    target=_thread_loop,
-                    name=name[:14],
-                    args=(databases_pool, db, tq, commit_lock, timeouts, data, log))
-                t.start()
-                databases[db] = (t, tq)
-                if epfile:
-                    epfile.write("%s\n" % db)
-                    epfile.flush()
-                log.info("Endpoint added! (%s)", db)
+            db, name, t, tq = start_writer(db, epfile)
             if cmd != 'INIT':
                 try:
                     tq.put((cmd, db, args))
