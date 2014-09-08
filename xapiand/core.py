@@ -16,6 +16,9 @@ from .serialise import serialise_value, normalize
 from .utils import parse_url, build_url
 
 
+DOCUMENT_ID_TERM_PREFIX = 'Q'
+DOCUMENT_CUSTOM_TERM_PREFIX = 'X'
+
 KEY_RE = re.compile(r'[_a-zA-Z][_a-zA-Z0-9]*')
 
 

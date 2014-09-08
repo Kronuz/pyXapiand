@@ -11,12 +11,11 @@ OFFSET_RE = re.compile(r'\bOFFSET\s+(\d+)\b', re.IGNORECASE)
 LIMIT_RE = re.compile(r'\bLIMIT\s+(\d+)\b', re.IGNORECASE)
 ORDER_BY_RE = re.compile(r'\bORDER\s+BY\s+([-+_a-zA-Z0-9, ]+?)(\s+ASC\b|\s+DESC\b|$)', re.IGNORECASE)
 FACETS_RE = re.compile(r'\bFACETS\s+(\d+)?([_a-zA-Z0-9, ]+)\b', re.IGNORECASE)
-PARTIAL_RE = re.compile(r'\bPARTIAL\s+([_a-zA-Z0-9, *]+)\b', re.IGNORECASE)
-SEARCH_RE = re.compile(r'\bSEARCH\s+(.+)', re.IGNORECASE)
-TERMS_RE = re.compile(r'\bTERMS\s+(.+)', re.IGNORECASE)
-PREFIXES_RE = re.compile(r'\bPREFIXES\s+([_a-zA-Z0-9, :]+)\b', re.IGNORECASE)
+PARTIAL_RE = re.compile(r'\bPARTIAL\s+(.*)', re.IGNORECASE)
+SEARCH_RE = re.compile(r'\bSEARCH\s+(.*)', re.IGNORECASE)
+TERMS_RE = re.compile(r'\bTERMS\s+(.*)', re.IGNORECASE)
 
-CMDS_RE = re.compile(r'\b(OFFSET|LIMIT|ORDER\s+BY|FACETS|PARTIAL|SEARCH|TERMS|PREFIXES)\s', re.IGNORECASE)
+CMDS_RE = re.compile(r'\b(OFFSET|LIMIT|ORDER\s+BY|FACETS|PARTIAL|SEARCH|TERMS)\s', re.IGNORECASE)
 
 
 def index_parser(document):
@@ -161,7 +160,6 @@ def search_parser(query_string):
         PARTIAL <partial ...> [PARTIAL <partial ...>]...
         TERMS <term ...>
         FACETS <min> <field_name ...>
-        PREFIXES <field_name:prefix ...>
         OFFSET <offset>
         LIMIT <limit>
         ORDER BY <field_name ...> [ASC|DESC]
@@ -179,12 +177,11 @@ def search_parser(query_string):
     check_at_least = 0
     sort_by = None
     sort_by_reversed = None
-    search = None
+    search = []
     facets = None
-    terms = None
-    prefixes = None
+    terms = []
 
-    query_string = 'SEARCH %s' % (query_string or '')
+    query_string = " SEARCH %s " % (query_string or '')
     query_re = r''.join('(%s.*)' % s for s in CMDS_RE.findall(query_string))
 
     for string in re.search(query_re, query_string).groups():
@@ -231,7 +228,9 @@ def search_parser(query_string):
         match = PARTIAL_RE.search(string)
         if match:
             string = PARTIAL_RE.sub('', string)
-            partials.append(match.group(1).strip())
+            v = match.group(1).strip()
+            if v:
+                partials.append(v)
             # print "partials:", partials
             continue
 
@@ -239,23 +238,19 @@ def search_parser(query_string):
         match = TERMS_RE.search(string)
         if match:
             string = TERMS_RE.sub('', string)
-            terms = match.group(1).strip()
+            v = match.group(1).strip()
+            if v:
+                terms.append(v)
             # print "terms:", terms
-            continue
-
-        match = PREFIXES_RE.search(string)
-        if match:
-            string = PREFIXES_RE.sub('', string)
-            prefixes = SPLIT_RE.split(match.group(1).strip())
-            prefixes = dict(p.split(':', 1) for p in prefixes)
-            # print "prefixes:", prefixes
             continue
 
         # Get searchs:
         match = SEARCH_RE.search(string)
         if match:
             string = SEARCH_RE.sub('', string)
-            search = match.group(1).strip()
+            v = match.group(1).strip()
+            if v:
+                search.append(v)
             # print "search:", search
             continue
 
@@ -267,7 +262,6 @@ def search_parser(query_string):
         'first': first,
         'maxitems': maxitems,
         'sort_by': sort_by,
-        'prefixes': prefixes,
 
         'sort_by_reversed': sort_by_reversed,
         'check_at_least': check_at_least,

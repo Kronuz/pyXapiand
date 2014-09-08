@@ -1,6 +1,5 @@
 from __future__ import absolute_import, unicode_literals
 
-import os
 import hashlib
 
 try:
@@ -9,9 +8,8 @@ except ImportError:
     import pickle
 
 from xapiand import Xapian
-from xapiand.core import get_slot
+from xapiand.core import get_slot, DOCUMENT_ID_TERM_PREFIX, DOCUMENT_CUSTOM_TERM_PREFIX
 from xapiand.serialise import LatLongCoord
-from xapiand.exceptions import XapianError
 from xapiand.results import XapianResults
 
 from haystack import connections
@@ -20,13 +18,11 @@ from haystack.backends import BaseEngine, BaseSearchBackend, BaseSearchQuery, lo
 from haystack.models import SearchResult
 from haystack.utils import get_identifier
 
-from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
-
-DOCUMENT_ID_TERM_PREFIX = 'Q'
-DOCUMENT_CUSTOM_TERM_PREFIX = 'X'
-DOCUMENT_CT_TERM_PREFIX = DOCUMENT_CUSTOM_TERM_PREFIX + 'CT'
+DOCUMENT_CT_FIELD = 'content_type'
+DOCUMENT_AC_FIELD = 'ac'
+DOCUMENT_TAGS_FIELD = 'tags'
 
 
 def consistent_hash(key, num_buckets):
@@ -89,6 +85,7 @@ class XapianSearchBackend(BaseSearchBackend):
         timeout = connection_options.get('TIMEOUT', None)
         servers = connection_options.get('SERVERS', 'localhost:8890')
         self.xapian = Xapian(servers, using=endpoints, socket_timeout=timeout)
+        self.endpoints = endpoints
 
         self.language = language or connection_options.get('LANGUAGE', 'english')
 
@@ -123,9 +120,13 @@ class XapianSearchBackend(BaseSearchBackend):
 
                     if field_type == 'text':
                         if field['mode'] == 'autocomplete':  # mode = content, autocomplete, tagged
-                            document_terms.append(dict(term=value, weight=weight, prefix=DOCUMENT_CUSTOM_TERM_PREFIX + 'AC'))
+                            _prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(DOCUMENT_AC_FIELD))
+                            document_terms.append(dict(term=value, weight=weight, prefix=_prefix))
                         elif field['mode'] == 'tagged':
-                            document_terms.append(dict(term=value, weight=weight, prefix=prefix))
+                            _prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(DOCUMENT_TAGS_FIELD))
+                            document_terms.append(dict(term=value, weight=weight, prefix=_prefix))
+                        else:
+                            document_texts.append(dict(text=value, weight=weight, prefix=prefix))
 
                     elif field_type in ('ngram', 'edge_ngram'):
                         NGRAM_MIN_LENGTH = 1
@@ -138,16 +139,23 @@ class XapianSearchBackend(BaseSearchBackend):
                         lat, _, lng = value.partition(',')
                         value = LatLongCoord(float(lat), float(lng))
                         data[field_name] = value
+                        document_values[field_name] = value
+
+                    elif field_type == 'boolean':
+                        document_terms.append(dict(term=value, weight=weight, prefix=prefix))
+
+                    elif field_type in ('date', 'integer', 'long', 'float'):
+                        document_values[field_name] = value
+                        document_terms.append(dict(term=value, weight=weight, prefix=prefix))
 
                     if field_name == self.content_field_name:
-                        document_texts.append(dict(text=value, weight=weight, prefix=prefix))
-
-                    document_values[field_name] = value
+                        pass
 
         document_data = pickle.dumps((obj._meta.app_label, obj._meta.module_name, obj.pk, data))
         document_id = DOCUMENT_ID_TERM_PREFIX + get_identifier(obj)
 
-        document_terms.append(dict(term='%s.%s' % (obj._meta.app_label, obj._meta.module_name), weight=0, prefix=DOCUMENT_CT_TERM_PREFIX))
+        _prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(DOCUMENT_CT_FIELD))
+        document_terms.append(dict(term='%s__%s' % (obj._meta.app_label, obj._meta.module_name), weight=0, prefix=_prefix))
 
         endpoint = self.endpoints[consistent_hash(document_id, len(self.endpoints))]
 
@@ -172,7 +180,9 @@ class XapianSearchBackend(BaseSearchBackend):
         pass
 
     @log_query
-    def search(self, query_string, end_offset=None, start_offset=None, **kwargs):
+    def search(self, query_string, start_offset, end_offset=None,
+               ranges=None, terms=None, partials=None, models=None,
+               **kwargs):
         """
         Returns:
             A dictionary with the following keys:
@@ -199,7 +209,21 @@ class XapianSearchBackend(BaseSearchBackend):
             'queries': {},
         }
 
-        results = self.xapian.search(query_string, offset=offset, limit=limit, results_class=XapianSearchResults)
+        if models:
+            if not terms:
+                terms = set()
+            terms.update('%s:%s__%s' % (DOCUMENT_CT_FIELD, model._meta.app_label, model._meta.module_name) for model in models)
+
+        query_string = query_string.replace('### AND ###', '').replace('###', '').replace('()', '')
+        results = self.xapian.search(
+            query_string,
+            offset=offset,
+            limit=limit,
+            results_class=XapianSearchResults,
+            ranges=ranges,
+            terms=terms,
+            partials=partials,
+        )
         for facet in results.facets:
             facets['fields'][facet['name']] = (facet['term'], facet['termfreq'])
 
@@ -231,7 +255,7 @@ class XapianSearchBackend(BaseSearchBackend):
         """
         content_field_name = ''
         schema_fields = [
-            {'field_name': ID, 'type': 'text', 'multi_valued': 'false', 'column': 0, 'stored': True, 'mode': None},
+            {'field_name': ID, 'type': 'id', 'multi_valued': False, 'column': 0, 'stored': True, 'mode': None},
         ]
         column = len(schema_fields)
 
@@ -290,35 +314,60 @@ class XapianSearchBackend(BaseSearchBackend):
 class XapianSearchQuery(BaseSearchQuery):
     def __init__(self, using=DEFAULT_ALIAS):
         super(XapianSearchQuery, self).__init__(using=using)
-        # self._facets = []
-        # self._terms = []
-        # self._partial = []
-        # self._search = []
-        # self._offset = None
-        # self._limit = None
-        # self._order_by = []
+        self.partials = []
+        self.terms = set()
+        self.ranges = set()
+
+    def build_params(self, spelling_query=None):
+        kwargs = super(XapianSearchQuery, self).build_params(spelling_query=spelling_query)
+        if self.terms:
+            kwargs['terms'] = self.terms
+        if self.partials:
+            kwargs['partials'] = self.partials
+        if self.ranges:
+            kwargs['ranges'] = self.ranges
+        return kwargs
 
     def build_query_fragment(self, field, filter_type, value):
-        # import ipdb; ipdb.set_trace()
         if filter_type == 'contains':
-            pass
-            # self._search.append(value)
+            value = '%s:%s' % (field, value)
+
         elif filter_type == 'like':
-            pass
+            self.partials.append(' '.join('%s:%s' % (field, v) for v in value.split()))
+            value = '###'
+
         elif filter_type == 'exact':
-            pass
-        elif filter_type == 'gt':
-            pass
+            if field == DOCUMENT_AC_FIELD:
+                self.partials.append(' '.join('%s:%s' % (field, v) for v in value.split()))
+                value = '###'
+            elif field == DOCUMENT_TAGS_FIELD:
+                self.terms.add(value)
+                value = '###'
+            else:
+                value = '%s:"%s"' % (field, value)
+
         elif filter_type == 'gte':
-            pass
-        elif filter_type == 'lt':
-            pass
+            self.ranges.add((field, value, None))
+            value = '(%s:%s..)' % (field, value)
+
+        elif filter_type == 'gt':
+            self.ranges.add((field, None, value))
+            value = 'NOT %s' % '(%s:..%s)' % (field, value)
+
         elif filter_type == 'lte':
-            pass
+            self.ranges.add((field, None, value))
+            value = '(%s:..%s)' % (field, value)
+
+        elif filter_type == 'lt':
+            self.ranges.add((field, value, None))
+            value = 'NOT %s' % '(%s:%s..)' % (field, value)
+
         elif filter_type == 'startswith':
-            pass
+            value = '%s:%s*' % (field, value)
+
         elif filter_type == 'in':
-            pass
+            value = '(%s)' % ' OR '.join('%s:%s' % (field, v) for v in value)
+
         return value
 
 

@@ -80,7 +80,7 @@ class XapianConnection(Connection):
     @command
     def facets(self, search, *facets, **kwargs):
         terms = kwargs.get('terms')
-        prefixes = kwargs.get('prefixes')
+        ranges = kwargs.get('ranges')
         partials = kwargs.get('partials')
         results_class = kwargs.get('results_class', XapianResults)
         query = search_parser(search if isinstance(search, dict) else 'FACETS ' + search)
@@ -89,8 +89,8 @@ class XapianConnection(Connection):
             query['facets'].extend(facets)
         if terms is not None:
             query['terms'] = terms
-        if prefixes is not None:
-            query['prefixes'] = prefixes
+        if ranges is not None:
+            query['ranges'] = ranges
         if partials is not None:
             query['partials'] = partials
         del query['first']
@@ -100,13 +100,13 @@ class XapianConnection(Connection):
         return results_class(results)
 
     @command
-    def terms(self, search=None, terms=None, prefixes=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
+    def terms(self, search=None, terms=None, ranges=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
         query = search_parser(search if isinstance(search, dict) else 'TERMS ' + search)
         del query['facets']
         if terms is not None:
             query['terms'] = terms
-        if prefixes is not None:
-            query['prefixes'] = prefixes
+        if ranges is not None:
+            query['ranges'] = ranges
         if partials is not None:
             query['partials'] = partials
         if offset is not None:
@@ -119,14 +119,14 @@ class XapianConnection(Connection):
         return results_class(results)
 
     @command
-    def find(self, search=None, facets=None, terms=None, prefixes=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
+    def find(self, search=None, facets=None, terms=None, ranges=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
         query = search_parser(search)
         if facets is not None:
             query['facets'] = facets
         if terms is not None:
             query['terms'] = terms
-        if prefixes is not None:
-            query['prefixes'] = prefixes
+        if ranges is not None:
+            query['ranges'] = ranges
         if partials is not None:
             query['partials'] = partials
         if offset is not None:
@@ -139,14 +139,14 @@ class XapianConnection(Connection):
         return results_class(results)
 
     @command
-    def search(self, search=None, facets=None, terms=None, prefixes=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
+    def search(self, search=None, facets=None, terms=None, ranges=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
         query = search_parser(search)
         if facets is not None:
             query['facets'] = facets
         if terms is not None:
             query['terms'] = terms
-        if prefixes is not None:
-            query['prefixes'] = prefixes
+        if ranges is not None:
+            query['ranges'] = ranges
         if partials is not None:
             query['partials'] = partials
         if offset is not None:
@@ -159,14 +159,14 @@ class XapianConnection(Connection):
         return results_class(results)
 
     @command
-    def count(self, search=None, terms=None, prefixes=None, partials=None):
-        if search or terms or prefixes or partials:
+    def count(self, search=None, terms=None, ranges=None, partials=None):
+        if search or terms or partials:
             query = search_parser(search)
             del query['facets']
             if terms is not None:
                 query['terms'] = terms
-            if prefixes is not None:
-                query['prefixes'] = prefixes
+            if ranges is not None:
+                query['ranges'] = ranges
             if partials is not None:
                 query['partials'] = partials
             del query['first']
