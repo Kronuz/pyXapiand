@@ -2,8 +2,12 @@ from __future__ import absolute_import, unicode_literals
 
 import os
 import re
+import time
 import logging
+import threading
 from hashlib import md5
+from collections import deque
+from contextlib import contextmanager
 
 import xapian
 
@@ -20,27 +24,27 @@ def get_slot(name):
         return int(md5(name.lower()).hexdigest(), 16) & 0xffffffff
 
 
-def _xapian_subdatabase(databases_pool, db, writable, create, data='.', log=logging):
+def _xapian_subdatabase(subdatabases, db, writable, create, data='.', log=logging):
     parse = parse_url(db)
     scheme, hostname, port, username, password, path, query, query_dict = parse
     key = (scheme, hostname, port, username, password, path)
     try:
-        return databases_pool[(writable, key)], False
+        return subdatabases[(writable, key)], False
     except KeyError:
         if scheme == 'file':
-            database = _xapian_database_open(databases_pool, path, writable, create, data, log)
+            database = _xapian_database_open(path, writable, create, data, log)
         elif scheme == 'xapian':
             timeout = int(query_dict.get('timeout', 0))
-            database = _xapian_database_connect(databases_pool, hostname, port or 33333, timeout, writable, data, log)
+            database = _xapian_database_connect(hostname, port or 33333, timeout, writable, data, log)
         else:
             raise InvalidIndexError("Invalid database scheme")
         database._db = db
-        databases_pool[(writable, key)] = database
+        subdatabases[(writable, key)] = database
         log.debug("Subdatabase %s: %s", 'created' if create else 'opened', database._db)
         return database, True
 
 
-def _xapian_database_open(databases_pool, path, writable, create, data='.', log=logging):
+def _xapian_database_open(path, writable, create, data='.', log=logging):
     try:
         if create:
             try:
@@ -68,7 +72,7 @@ def _xapian_database_open(databases_pool, path, writable, create, data='.', log=
     return database
 
 
-def _xapian_database_connect(databases_pool, host, port, timeout, writable, data='.', log=logging):
+def _xapian_database_connect(host, port, timeout, writable, data='.', log=logging):
     try:
         if writable:
             database = xapian.remote_open_writable(host, port, timeout)
@@ -79,49 +83,110 @@ def _xapian_database_connect(databases_pool, host, port, timeout, writable, data
     return database
 
 
-def _xapian_database(databases_pool, endpoints, writable, create, data='.', log=logging):
-    try:
-        return databases_pool[(writable, endpoints)], False
-    except KeyError:
-        if writable:
-            database = xapian.WritableDatabase()
-        else:
-            database = xapian.Database()
-        databases = len(endpoints)
+def _xapian_database(endpoints, writable, create, data='.', log=logging):
+    if writable:
+        database = xapian.WritableDatabase()
+    else:
+        database = xapian.Database()
+    databases = len(endpoints)
 
-        _all_databases = [None] * databases
-        _all_databases_config = [None] * databases
-        database._all_databases = _all_databases
-        database._all_databases_config = _all_databases_config
-        database._endpoints = endpoints
-        database._databases_pool = databases_pool
-        for subdatabase_number, db in enumerate(endpoints):
-            if database._all_databases[subdatabase_number] is None:
-                _database, _ = _xapian_subdatabase(databases_pool, db, writable, create, data, log)
-                database._all_databases[subdatabase_number] = _database
-                database._all_databases_config[subdatabase_number] = (db, writable, create)
-                if _database:
-                    database.add_database(_database)
-        database._db = ' '.join(d._db for d in database._all_databases if d)
-        databases_pool[(writable, endpoints)] = database
-        log.debug("Databases %s: %s", 'created' if create else 'opened', database._db)
-        return database, True
+    _all_databases = [None] * databases
+    _all_databases_config = [None] * databases
+    database._all_databases = _all_databases
+    database._all_databases_config = _all_databases_config
+    database._endpoints = endpoints
+    database._subdatabases = {}
+    for subdatabase_number, db in enumerate(endpoints):
+        if database._all_databases[subdatabase_number] is None:
+            _database, _ = _xapian_subdatabase(database._subdatabases, db, writable, create, data, log)
+            database._all_databases[subdatabase_number] = _database
+            database._all_databases_config[subdatabase_number] = (db, writable, create)
+            if _database:
+                database.add_database(_database)
+    database._db = ' '.join(d._db for d in database._all_databases if d)
+    database._closed = False
+
+    log.debug("Databases %s: %s", "created" if create else "opened", database._db)
+    return database
 
 
-def xapian_database(databases_pool, endpoints, writable, create=False, data='.', log=logging):
+class DatabasesPoolQueue(object):
+    def __init__(self):
+        self.lock = threading.RLock()
+        self.time = time.time()
+        self.unused = deque()
+        self.used = deque()
+
+
+class DatabasesPool(dict):
+    def __init__(self, *args, **kwargs):
+        super(DatabasesPool, self).__init__(*args, **kwargs)
+        self.lock = threading.RLock()
+        self.time = time.time()
+
+    def cleanup(self, timeout, data='.', log=logging):
+        """
+        Removes old timedout databases from the pool.
+
+        """
+        if time.time() - self.time < timeout:
+            return
+
+        with self.lock:
+            removed_queues = []
+            for (writable, endpoints), pool_queue in list(self.items()):
+                if not len(pool_queue.used) and time.time() - pool_queue.time > timeout:
+                    removed_queues.append(pool_queue)
+                    del self[(writable, endpoints)]
+            self.time = time.time()
+
+        for pool_queue in removed_queues:
+            for database in pool_queue.unused:
+                xapian_close(database, data=data, log=log)
+
+
+@contextmanager
+def xapian_database(databases_pool, endpoints, writable, create=False, reopen=False, data='.', log=logging):
     """
     Returns a xapian.Database with multiple endpoints attached.
 
     """
+    database = None
+    new = False
     endpoints = tuple(build_url(*parse_url(db.strip())) for db in endpoints)
-    database, fresh = _xapian_database(databases_pool, endpoints, writable, create, data=data, log=log)
-    if not writable and not fresh:  # Make sure we always read the latest:
-        database = xapian_reopen(database, data=data, log=log)
-    return database
+
+    with databases_pool.lock:
+        pool_queue = databases_pool.setdefault((writable, endpoints), DatabasesPoolQueue())
+        with pool_queue.lock:
+            try:
+                database = pool_queue.unused.pop()
+                pool_queue.used.append(database)
+            except IndexError:
+                new = True
+            pool_queue.time = time.time()
+
+        try:
+            if new:
+                database = _xapian_database(endpoints, writable, create, data=data, log=log)
+                pool_queue.used.append(database)
+            if reopen:
+                database = xapian_reopen(database, data=data, log=log)
+            yield database
+
+        finally:
+            if database:
+                with pool_queue.lock:
+                    pool_queue.used.remove(database)
+                    if len(pool_queue.unused) < 10:
+                        if not database._closed:
+                            pool_queue.unused.append(database)
+                    else:
+                        xapian_close(database)
+                    pool_queue.time = time.time()
 
 
 def xapian_close(database, data='.', log=logging):
-    databases_pool = database._databases_pool
+    databases_pool = database._subdatabases
 
     # Could not be opened, try full reopen:
     endpoints = database._endpoints
@@ -148,10 +213,11 @@ def xapian_close(database, data='.', log=logging):
         if subdatabase:
             subdatabase.close()
 
+    database._closed = True
+    log.debug("Databases %s: %s", "closed", database._db)
+
 
 def xapian_reopen(database, data='.', log=logging):
-    databases_pool = database._databases_pool
-
     try:
         database.reopen()
     except (xapian.DatabaseOpeningError, xapian.NetworkError) as e:
@@ -162,12 +228,14 @@ def xapian_reopen(database, data='.', log=logging):
 
         endpoints = database._endpoints
         writable = isinstance(database, xapian.WritableDatabase)
-        database, _ = _xapian_database(databases_pool, endpoints, writable, False, data=data, log=log)
+        database = _xapian_database(endpoints, writable, False, data=data, log=log)
 
     return database
 
 
-def xapian_index(databases_pool, db, document, commit=False, data='.', log=logging):
+def xapian_index(database, db, document, commit=False, data='.', log=logging):
+    databases_pool = database._subdatabases
+
     db = build_url(*parse_url(db.strip()))
     subdatabase, _ = _xapian_subdatabase(databases_pool, db, True, False, data, log)
     if not subdatabase:
@@ -250,7 +318,9 @@ def xapian_index(databases_pool, db, document, commit=False, data='.', log=loggi
     return docid
 
 
-def xapian_delete(databases_pool, db, document_id, commit=False, data='.', log=logging):
+def xapian_delete(database, db, document_id, commit=False, data='.', log=logging):
+    databases_pool = database._subdatabases
+
     db = build_url(*parse_url(db))
     subdatabase, _ = _xapian_subdatabase(databases_pool, db, True, False, data=data, log=log)
     if not subdatabase:
@@ -263,7 +333,9 @@ def xapian_delete(databases_pool, db, document_id, commit=False, data='.', log=l
         subdatabase.commit()
 
 
-def xapian_commit(databases_pool, db, data='.', log=logging):
+def xapian_commit(database, db, data='.', log=logging):
+    databases_pool = database._subdatabases
+
     db = build_url(*parse_url(db))
     subdatabase, _ = _xapian_subdatabase(databases_pool, db, True, False, data=data, log=log)
     if not subdatabase:

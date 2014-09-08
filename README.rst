@@ -27,7 +27,7 @@ Connect to server using ``nc localhost 8890`` or ``telent localhost 8890``
 
 Create (or open) a new database and index a document::
 
-  CREATE example
+  USING example
 
   INDEX {"id": "doc1", "terms": [{"term": "test"}, {"term": "first"}], "data": "DATA"}
 
@@ -46,7 +46,7 @@ Connect and create a new database::
 
   from xapiand import Xapian
   x = Xapian('localhost:8890')
-  x.create('example')  # or x.using('example') if it already exists
+  x.using(['example'])  # or x.open(['example']) if it already exists
 
 Index a couple documents::
 
