@@ -40,7 +40,7 @@ def _xapian_subdatabase(subdatabases, db, writable, create, data='.', log=loggin
             raise InvalidIndexError("Invalid database scheme")
         database._db = db
         subdatabases[(writable, key)] = database
-        log.debug("Subdatabase %s: %s", 'created' if create else 'opened', database._db)
+        log.debug("%s %s: %s", "Writable endpoint" if writable else "Endpoint", "used" if create else "opened", database._db)
         return database, True
 
 
@@ -88,14 +88,20 @@ def _xapian_database(endpoints, writable, create, data='.', log=logging):
         database = xapian.WritableDatabase()
     else:
         database = xapian.Database()
-    databases = len(endpoints)
 
+    databases = len(endpoints)
     _all_databases = [None] * databases
     _all_databases_config = [None] * databases
+
     database._all_databases = _all_databases
     database._all_databases_config = _all_databases_config
     database._endpoints = endpoints
     database._subdatabases = {}
+
+    database._db = ' '.join(d._db for d in database._all_databases if d)
+    database._closed = False
+    log.debug("%s %s: %s", "Writable database" if writable else "Database", "used" if create else "opened", database._db)
+
     for subdatabase_number, db in enumerate(endpoints):
         if database._all_databases[subdatabase_number] is None:
             _database, _ = _xapian_subdatabase(database._subdatabases, db, writable, create, data, log)
@@ -103,10 +109,7 @@ def _xapian_database(endpoints, writable, create, data='.', log=logging):
             database._all_databases_config[subdatabase_number] = (db, writable, create)
             if _database:
                 database.add_database(_database)
-    database._db = ' '.join(d._db for d in database._all_databases if d)
-    database._closed = False
 
-    log.debug("Databases %s: %s", "created" if create else "opened", database._db)
     return database
 
 
