@@ -401,24 +401,16 @@ class XapianReceiver(CommandReceiver):
         lines = []
         databases = self.server.databases_pool.items()
         if databases:
-            writale_cnt = 0
             for (writable, endpoints), pool_queue in databases:
                 if writable:
-                    if writale_cnt == 0:
-                        lines.append("  Writer Databases:")
-                    writale_cnt += 1
-                    lines.append("    %s, pool: %s/%s, idle: ~%s" % (_database_name(endpoints[0]), len(pool_queue.used), len(pool_queue.used) + len(pool_queue.unused), format_time(now - pool_queue.time)))
+                    lines.append("    Writer %s, pool: %s/%s, idle: ~%s" % (_database_name(endpoints[0]), len(pool_queue.used), len(pool_queue.used) + len(pool_queue.unused), format_time(now - pool_queue.time)))
                     for endpoint in endpoints:
-                        lines.append("      %s" % endpoint)
-            readable_cnt = 0
+                        lines.append("        %s" % endpoint)
             for (writable, endpoints), pool_queue in databases:
                 if not writable:
-                    if readable_cnt == 0:
-                        lines.append("  Reader Databases:")
-                    readable_cnt += 1
-                    lines.append("    %s endpoints, pool: %s/%s, idle: ~%s" % (len(endpoints), len(pool_queue.used), len(pool_queue.used) + len(pool_queue.unused), format_time(now - pool_queue.time)))
+                    lines.append("    Reader with %s endpoint%s, pool: %s/%s, idle: ~%s" % (len(endpoints), 's' if len(endpoints) != 1 else '', len(pool_queue.used), len(pool_queue.used) + len(pool_queue.unused), format_time(now - pool_queue.time)))
                     for endpoint in endpoints:
-                        lines.append("      %s" % endpoint)
+                        lines.append("        %s" % endpoint)
         else:
             lines.append("    No active databases.")
         size = len(databases)
@@ -733,16 +725,11 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
 
     # Initialize seen writers:
     writers_file = os.path.join(data, WRITERS_FILE)
-    try:
-        epfile = open(writers_file, 'rt').readlines()
-    except IOError:
-        epfile = None
-    for i, db in enumerate(epfile or []):
-        if i == 0:
-            log.debug("Initializing writers...")
-        start_writer(db)
-    if epfile:
-        epfile.close()
+    with open(writers_file, 'rt') as epfile:
+        for i, db in enumerate(epfile):
+            if i == 0:
+                log.debug("Initializing writers...")
+            start_writer(db)
 
     log.info("Waiting for commands...")
     msg = None
@@ -778,15 +765,10 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
     log.debug("Waiting for server to stop...")
     gevent.wait()  # Wait for worker
 
-    try:
-        epfile = open(writers_file, 'wt')
-    except OSError:
-        log.error("Cannot write to writers file '%s'!", writers_file)
-    else:
+    with open(writers_file, 'wt') as epfile:
         for db, (t, tq) in databases.items():
             if t.is_alive():
                 epfile.write("%s\n" % db)
-        epfile.close()
 
     # Wake up writers:
     for t, tq in databases.values():

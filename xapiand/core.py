@@ -129,16 +129,17 @@ class DatabasesPool(dict):
         Removes old timedout databases from the pool.
 
         """
-        if time.time() - self.time < timeout:
+        now = time.time()
+        if now - self.time < timeout:
             return
 
         with self.lock:
             removed_queues = []
             for (writable, endpoints), pool_queue in list(self.items()):
-                if not len(pool_queue.used) and time.time() - pool_queue.time > timeout:
+                if not len(pool_queue.used) and now - pool_queue.time > timeout:
                     removed_queues.append(pool_queue)
                     del self[(writable, endpoints)]
-            self.time = time.time()
+            self.time = now
 
         for pool_queue in removed_queues:
             for database in pool_queue.unused:
@@ -165,35 +166,36 @@ def xapian_database(databases_pool, endpoints, writable, create=False, reopen=Fa
                 new = True
             pool_queue.time = time.time()
 
-        try:
-            if new:
-                database = _xapian_database(endpoints, writable, create, data=data, log=log)
-                pool_queue.used.append(database)
-            if reopen:
-                database = xapian_reopen(database, data=data, log=log)
-            yield database
+    try:
+        if new:
+            database = _xapian_database(endpoints, writable, create, data=data, log=log)
+            pool_queue.used.append(database)
+        if reopen:
+            database = xapian_reopen(database, data=data, log=log)
 
-        finally:
+        yield database
+
+    finally:
+        with pool_queue.lock:
             if database:
-                with pool_queue.lock:
-                    pool_queue.used.remove(database)
-                    if len(pool_queue.unused) < 10:
-                        if not database._closed:
-                            pool_queue.unused.append(database)
-                    else:
-                        xapian_close(database)
-                    pool_queue.time = time.time()
+                pool_queue.used.remove(database)
+                if len(pool_queue.unused) < 10:
+                    if not database._closed:
+                        pool_queue.unused.append(database)
+                else:
+                    xapian_close(database)
+            pool_queue.time = time.time()
 
 
 def xapian_close(database, data='.', log=logging):
-    databases_pool = database._subdatabases
+    subdatabases = database._subdatabases
 
     # Could not be opened, try full reopen:
     endpoints = database._endpoints
     writable = isinstance(database, xapian.WritableDatabase)
 
     # Remove database from pool
-    _database = databases_pool.pop((writable, endpoints), None)
+    _database = subdatabases.pop((writable, endpoints), None)
     assert not _database or _database == database
     # ...and close.
     if database:
@@ -207,7 +209,7 @@ def xapian_close(database, data='.', log=logging):
         key = (scheme, hostname, port, username, password, path)
 
         # Remove subdatabase from pool
-        _subdatabase = databases_pool.pop((writable, key), None)
+        _subdatabase = subdatabases.pop((writable, key), None)
         assert not _subdatabase or _subdatabase == subdatabase
         # ...and close (close on the main database should have already closed it anyway).
         if subdatabase:
@@ -234,10 +236,10 @@ def xapian_reopen(database, data='.', log=logging):
 
 
 def xapian_index(database, db, document, commit=False, data='.', log=logging):
-    databases_pool = database._subdatabases
+    subdatabases = database._subdatabases
 
     db = build_url(*parse_url(db.strip()))
-    subdatabase, _ = _xapian_subdatabase(databases_pool, db, True, False, data, log)
+    subdatabase, _ = _xapian_subdatabase(subdatabases, db, True, False, data, log)
     if not subdatabase:
         log.error("Database is None (db:%s)", db)
         return
@@ -319,10 +321,10 @@ def xapian_index(database, db, document, commit=False, data='.', log=logging):
 
 
 def xapian_delete(database, db, document_id, commit=False, data='.', log=logging):
-    databases_pool = database._subdatabases
+    subdatabases = database._subdatabases
 
     db = build_url(*parse_url(db))
-    subdatabase, _ = _xapian_subdatabase(databases_pool, db, True, False, data=data, log=log)
+    subdatabase, _ = _xapian_subdatabase(subdatabases, db, True, False, data=data, log=log)
     if not subdatabase:
         log.error("Database is None (db:%s)", db)
         return
@@ -334,12 +336,13 @@ def xapian_delete(database, db, document_id, commit=False, data='.', log=logging
 
 
 def xapian_commit(database, db, data='.', log=logging):
-    databases_pool = database._subdatabases
+    subdatabases = database._subdatabases
 
     db = build_url(*parse_url(db))
-    subdatabase, _ = _xapian_subdatabase(databases_pool, db, True, False, data=data, log=log)
+    subdatabase, _ = _xapian_subdatabase(subdatabases, db, True, False, data=data, log=log)
     if not subdatabase:
-        log.error("Database is None (db:%s)", db)
+        log.error("Subdatabase is None: %s", db)
         return
 
     subdatabase.commit()
+    log.debug('Commit executed: %s', db)
