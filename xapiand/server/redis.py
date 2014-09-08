@@ -23,6 +23,8 @@ class VersionMismatch(Exception):
 
 
 class RedisQueue(object):
+    persistent = True
+
     STOPPED = False
     CONNECTED = False
     retry = 0

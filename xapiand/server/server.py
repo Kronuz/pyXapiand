@@ -723,13 +723,14 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
             t.start()
         return db, name, t, tq
 
-    # Initialize seen writers:
-    writers_file = os.path.join(data, WRITERS_FILE)
-    with open(writers_file, 'rt') as epfile:
-        for i, db in enumerate(epfile):
-            if i == 0:
-                log.debug("Initializing writers...")
-            start_writer(db)
+    if PQueue.persistent:
+        # Initialize seen writers:
+        writers_file = os.path.join(data, WRITERS_FILE)
+        with open(writers_file, 'rt') as epfile:
+            for i, db in enumerate(epfile):
+                if i == 0:
+                    log.debug("Initializing writers...")
+                start_writer(db)
 
     log.info("Waiting for commands...")
     msg = None
@@ -765,10 +766,11 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
     log.debug("Waiting for server to stop...")
     gevent.wait()  # Wait for worker
 
-    with open(writers_file, 'wt') as epfile:
-        for db, (t, tq) in databases.items():
-            if t.is_alive():
-                epfile.write("%s\n" % db)
+    if PQueue.persistent:
+        with open(writers_file, 'wt') as epfile:
+            for db, (t, tq) in databases.items():
+                if t.is_alive():
+                    epfile.write("%s\n" % db)
 
     # Wake up writers:
     for t, tq in databases.values():

@@ -27,6 +27,8 @@ def flock(fd):
 
 
 class FileQueue(object):
+    persistent = True
+
     STOPPED = False
 
     shm_size = len(marshal.dumps((0, 0, 0)))

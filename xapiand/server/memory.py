@@ -6,6 +6,8 @@ import logging
 
 
 class MemoryQueue(Queue):
+    persistent = False
+
     def __init__(self, name=None, log=logging):
         self.name = name
         self.log = log
