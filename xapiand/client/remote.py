@@ -9,6 +9,12 @@ from ..results import XapianResults
 from .connection import Connection, ServerPool, command
 
 
+def dumps(obj, **kwargs):
+    if isinstance(obj, dict):
+        obj = dict((k, v) for k, v in obj.items() if v)
+    return json.dumps(obj, **kwargs)
+
+
 class XapianConnection(Connection):
     def get_name(self):
         if self.endpoints:
@@ -63,7 +69,7 @@ class XapianConnection(Connection):
                 raise XapianError(line[8:])
 
     def _search(self, cmd, **query):
-        line = self.execute_command(cmd, json.dumps(query, ensure_ascii=False))
+        line = self.execute_command(cmd, dumps(query, ensure_ascii=False))
         while line:
             response = self._response(line)
             if response:
@@ -74,6 +80,7 @@ class XapianConnection(Connection):
     @command
     def facets(self, search, *facets, **kwargs):
         terms = kwargs.get('terms')
+        prefixes = kwargs.get('prefixes')
         partials = kwargs.get('partials')
         results_class = kwargs.get('results_class', XapianResults)
         query = search_parser(search if isinstance(search, dict) else 'FACETS ' + search)
@@ -82,6 +89,8 @@ class XapianConnection(Connection):
             query['facets'].extend(facets)
         if terms is not None:
             query['terms'] = terms
+        if prefixes is not None:
+            query['prefixes'] = prefixes
         if partials is not None:
             query['partials'] = partials
         del query['first']
@@ -91,11 +100,13 @@ class XapianConnection(Connection):
         return results_class(results)
 
     @command
-    def terms(self, search=None, terms=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
+    def terms(self, search=None, terms=None, prefixes=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
         query = search_parser(search if isinstance(search, dict) else 'TERMS ' + search)
         del query['facets']
         if terms is not None:
             query['terms'] = terms
+        if prefixes is not None:
+            query['prefixes'] = prefixes
         if partials is not None:
             query['partials'] = partials
         if offset is not None:
@@ -108,12 +119,14 @@ class XapianConnection(Connection):
         return results_class(results)
 
     @command
-    def find(self, search=None, facets=None, terms=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
+    def find(self, search=None, facets=None, terms=None, prefixes=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
         query = search_parser(search)
         if facets is not None:
             query['facets'] = facets
         if terms is not None:
             query['terms'] = terms
+        if prefixes is not None:
+            query['prefixes'] = prefixes
         if partials is not None:
             query['partials'] = partials
         if offset is not None:
@@ -126,12 +139,14 @@ class XapianConnection(Connection):
         return results_class(results)
 
     @command
-    def search(self, search=None, facets=None, terms=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
+    def search(self, search=None, facets=None, terms=None, prefixes=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
         query = search_parser(search)
         if facets is not None:
             query['facets'] = facets
         if terms is not None:
             query['terms'] = terms
+        if prefixes is not None:
+            query['prefixes'] = prefixes
         if partials is not None:
             query['partials'] = partials
         if offset is not None:
@@ -144,18 +159,20 @@ class XapianConnection(Connection):
         return results_class(results)
 
     @command
-    def count(self, search=None, terms=None, partials=None):
-        if search or terms or partials:
+    def count(self, search=None, terms=None, prefixes=None, partials=None):
+        if search or terms or prefixes or partials:
             query = search_parser(search)
             del query['facets']
             if terms is not None:
                 query['terms'] = terms
+            if prefixes is not None:
+                query['prefixes'] = prefixes
             if partials is not None:
                 query['partials'] = partials
             del query['first']
             query['maxitems'] = 0
             del query['sort_by']
-            search = json.dumps(query, ensure_ascii=False)
+            search = dumps(query, ensure_ascii=False)
         response = self._response(self.execute_command('COUNT', search))
         return int(response.split()[0])
 
@@ -168,7 +185,7 @@ class XapianConnection(Connection):
         return self._response(self.execute_command('CDELETE', id))
 
     def _index(self, cmd, obj, **kwargs):
-        return self._response(self.execute_command(cmd, json.dumps(obj or kwargs, ensure_ascii=False)))
+        return self._response(self.execute_command(cmd, dumps(obj or kwargs, ensure_ascii=False)))
 
     @command
     def index(self, obj=None, **kwargs):

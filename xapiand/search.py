@@ -27,10 +27,15 @@ class Search(object):
         self.dead = dead
 
         # SEARCH
-        qp = xapian.QueryParser()
-        qp.set_database(database)
+        queryparser = xapian.QueryParser()
+        queryparser.set_database(database)
 
         query = None
+
+        prefixes = obj.get('prefixes')
+        if prefixes:
+            for field, prefix in prefixes.items():
+                queryparser.add_prefix(field, prefix)
 
         # Build final query:
         search = obj.get('search')
@@ -42,11 +47,11 @@ class Search(object):
             if not query:
                 search = normalize(search)
                 try:
-                    query = qp.parse_query(search)
+                    query = queryparser.parse_query(search)
                 except (xapian.NetworkError, xapian.DatabaseModifiedError):
                     database = xapian_reopen(database, data=self.data, log=self.log)
-                    qp.set_database(database)
-                    query = qp.parse_query(search)
+                    queryparser.set_database(database)
+                    query = queryparser.parse_query(search)
 
         partials = obj.get('partials')
         if partials:
@@ -57,11 +62,11 @@ class Search(object):
                 partial = normalize(partial)
                 flags = xapian.QueryParser.FLAG_WILDCARD | xapian.QueryParser.FLAG_PARTIAL
                 try:
-                    _partials_query = qp.parse_query(partial, flags)
+                    _partials_query = queryparser.parse_query(partial, flags)
                 except (xapian.NetworkError, xapian.DatabaseModifiedError):
                     database = xapian_reopen(database, data=self.data, log=self.log)
-                    qp.set_database(database)
-                    _partials_query = qp.parse_query(partial, flags)
+                    queryparser.set_database(database)
+                    _partials_query = queryparser.parse_query(partial, flags)
                 if partials_query:
                     partials_query = xapian.Query(
                         xapian.Query.OP_AND_MAYBE,
@@ -84,11 +89,11 @@ class Search(object):
             # Partials (for autocomplete) using FLAG_BOOLEAN and OP_AND
             terms = normalize(terms)
             try:
-                terms_query = qp.parse_query(terms, xapian.QueryParser.FLAG_BOOLEAN)
+                terms_query = queryparser.parse_query(terms, xapian.QueryParser.FLAG_BOOLEAN)
             except (xapian.NetworkError, xapian.DatabaseModifiedError):
                 database = xapian_reopen(database, data=self.data, log=self.log)
-                qp.set_database(database)
-                terms_query = qp.parse_query(terms, xapian.QueryParser.FLAG_BOOLEAN)
+                queryparser.set_database(database)
+                terms_query = queryparser.parse_query(terms, xapian.QueryParser.FLAG_BOOLEAN)
             if query:
                 query = xapian.Query(
                     xapian.Query.OP_AND,
@@ -107,7 +112,7 @@ class Search(object):
         self.database = database
         self.query = query
         self.facets = obj.get('facets')
-        self.check_at_least = obj.get('check_at_least', MAX_DOCS)
+        self.check_at_least = obj.get('check_at_least', MAX_DOCS if self.facets else 0)
         self.maxitems = obj.get('maxitems', MAX_DOCS)
         self.first = obj.get('first', 0)
         self.sort_by = obj.get('sort_by')

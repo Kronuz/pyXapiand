@@ -14,8 +14,9 @@ FACETS_RE = re.compile(r'\bFACETS\s+(\d+)?([_a-zA-Z0-9, ]+)\b', re.IGNORECASE)
 PARTIAL_RE = re.compile(r'\bPARTIAL\s+([_a-zA-Z0-9, *]+)\b', re.IGNORECASE)
 SEARCH_RE = re.compile(r'\bSEARCH\s+(.+)', re.IGNORECASE)
 TERMS_RE = re.compile(r'\bTERMS\s+(.+)', re.IGNORECASE)
+PREFIXES_RE = re.compile(r'\bPREFIXES\s+([_a-zA-Z0-9, :]+)\b', re.IGNORECASE)
 
-CMDS_RE = re.compile(r'\b(OFFSET|LIMIT|ORDER\s+BY|FACETS|PARTIAL|SEARCH|TERMS)\s', re.IGNORECASE)
+CMDS_RE = re.compile(r'\b(OFFSET|LIMIT|ORDER\s+BY|FACETS|PARTIAL|SEARCH|TERMS|PREFIXES)\s', re.IGNORECASE)
 
 
 def index_parser(document):
@@ -160,6 +161,7 @@ def search_parser(query_string):
         PARTIAL <partial ...> [PARTIAL <partial ...>]...
         TERMS <term ...>
         FACETS <min> <field_name ...>
+        PREFIXES <field_name:prefix ...>
         OFFSET <offset>
         LIMIT <limit>
         ORDER BY <field_name ...> [ASC|DESC]
@@ -174,12 +176,13 @@ def search_parser(query_string):
     first = 0
     partials = []
     maxitems = 10000
-    check_at_least = 10000
+    check_at_least = 0
     sort_by = None
     sort_by_reversed = None
     search = None
     facets = None
     terms = None
+    prefixes = None
 
     query_string = 'SEARCH %s' % (query_string or '')
     query_re = r''.join('(%s.*)' % s for s in CMDS_RE.findall(query_string))
@@ -218,7 +221,7 @@ def search_parser(query_string):
             facets = SPLIT_RE.split(match.group(2).strip())
             if facets:
                 if match.group(1):
-                    check_at_least = max(min(int(match.group(1)), check_at_least), 0)
+                    check_at_least = max(min(int(match.group(1)), 10000), 0)
             else:
                 check_at_least = 0
             # print "facets:", facets
@@ -240,6 +243,14 @@ def search_parser(query_string):
             # print "terms:", terms
             continue
 
+        match = PREFIXES_RE.search(string)
+        if match:
+            string = PREFIXES_RE.sub('', string)
+            prefixes = SPLIT_RE.split(match.group(1).strip())
+            prefixes = dict(p.split(':', 1) for p in prefixes)
+            # print "prefixes:", prefixes
+            continue
+
         # Get searchs:
         match = SEARCH_RE.search(string)
         if match:
@@ -256,6 +267,7 @@ def search_parser(query_string):
         'first': first,
         'maxitems': maxitems,
         'sort_by': sort_by,
+        'prefixes': prefixes,
 
         'sort_by_reversed': sort_by_reversed,
         'check_at_least': check_at_least,
