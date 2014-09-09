@@ -1,26 +1,16 @@
 from __future__ import unicode_literals, absolute_import
 
-import re
 import base64
 import logging
 
 import xapian
 
 from . import json
-from .core import xapian_reopen, get_slot, DOCUMENT_CUSTOM_TERM_PREFIX
+from .core import xapian_reopen, get_slot, expand_terms, find_terms, DOCUMENT_CUSTOM_TERM_PREFIX
 from .serialise import normalize, serialise_value
 from .exceptions import XapianError
 
 MAX_DOCS = 10000
-
-PREFIX_RE = re.compile(r'[_a-zA-Z][_a-zA-Z0-9]*:')
-
-
-def find_prefixes(string):
-    for field in PREFIX_RE.findall(string):
-        field = field[:-1]
-        prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(field))
-        yield field, prefix
 
 
 class Search(object):
@@ -45,10 +35,11 @@ class Search(object):
         prefixes = set()
 
         def add_prefixes(string):
-            for field, prefix in find_prefixes(string):
-                if field not in prefixes:
-                    queryparser.add_prefix(field, prefix)
-                    prefixes.add(field)
+            for term, term_field, terms in find_terms(string):
+                if term_field and term_field not in prefixes:
+                    prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(term_field))
+                    queryparser.add_prefix(term_field, prefix)
+                    prefixes.add(term_field)
 
         # Build final query:
         search = obj.get('search')
@@ -91,6 +82,7 @@ class Search(object):
                         else:
                             search += b' AND %s' % rng2
 
+                search = expand_terms(search)
                 add_prefixes(search)
                 flags = xapian.QueryParser.FLAG_DEFAULT | xapian.QueryParser.FLAG_WILDCARD | xapian.QueryParser.FLAG_PURE_NOT
                 try:
@@ -109,6 +101,7 @@ class Search(object):
             for partial in partials:
                 self.dead or 'alive'  # Raises DeadException when needed
                 partial = normalize(partial)
+                partial = expand_terms(partial)
                 add_prefixes(partial)
                 flags = xapian.QueryParser.FLAG_PARTIAL
                 try:
@@ -140,6 +133,7 @@ class Search(object):
                 terms = [terms]
             for term in terms:
                 term = normalize(term)
+                term = expand_terms(term)
                 add_prefixes(term)
                 flags = xapian.QueryParser.FLAG_BOOLEAN | xapian.QueryParser.FLAG_PURE_NOT
                 try:

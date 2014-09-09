@@ -21,6 +21,41 @@ DOCUMENT_CUSTOM_TERM_PREFIX = 'X'
 
 KEY_RE = re.compile(r'[_a-zA-Z][_a-zA-Z0-9]*')
 
+PREFIX_RE = re.compile(r'(?:([_a-zA-Z][_a-zA-Z0-9]*):)?("[\w.]+"|[\w.]+)')
+TERM_SPLIT_RE = re.compile(r'\W')
+
+
+def find_terms(value, field=None):
+    for term_field, terms in PREFIX_RE.findall(value):
+        if not term_field:
+            term_field = field
+        for term in TERM_SPLIT_RE.split(terms):
+            yield term, term_field, terms
+
+
+def expand_terms(value, field=None, connector=' AND '):
+    all_terms = {}
+    for term, term_field, terms in find_terms(value, None):
+        all_terms.setdefault((term_field, terms), []).append(term)
+    replacements = []
+    for (term_field, terms), terms_list in all_terms.items():
+        if terms[0] == '"':
+            terms_list = [terms]
+        if term_field is None:
+            term_field = field
+            replace_ = terms
+        else:
+            replace_ = '%s:%s' % (term_field, terms)
+        if term_field:
+            with_ = connector.join('%s:%s' % (term_field, t) for t in terms_list if t)
+            if replace_ != with_:
+                replacements.append((replace_, with_, len(terms_list) > 1))
+    for replace_, with_, parenthesis in replacements:
+        if parenthesis and len(replacements) > 1:
+            with_ = '(' + with_ + ')'
+        value = value.replace(replace_, with_)
+    return value
+
 
 def get_slot(name):
     if KEY_RE.match(name):
@@ -265,25 +300,31 @@ def xapian_index(database, db, document, commit=False, data='.', log=logging):
             log.warning("Ignored document value name (%r)", name)
 
     if isinstance(document_id, basestring):
+        document_id = DOCUMENT_ID_TERM_PREFIX + document_id
         document.add_boolean_term(document_id)  # Make sure document_id is also a term (otherwise it doesn't replace an existing document)
 
-    for term in document_terms or ():
-        if isinstance(term, (tuple, list)):
-            term, weight, prefix, position = (list(term) + [None] * 4)[:4]
+    for terms in document_terms or ():
+        if isinstance(terms, (tuple, list)):
+            terms, weight, prefix, position = (list(terms) + [None] * 4)[:4]
         else:
             weight = prefix = position = None
-        if not term:
+        if not terms:
             continue
 
         weight = 1 if weight is None else weight
         prefix = '' if prefix is None else prefix
 
-        for term in serialise_value(term):
-            if term:
-                if position is None:
-                    document.add_term(prefix + term, weight)
-                else:
-                    document.add_posting(prefix + term, position, weight)
+        for term, field, terms in find_terms(terms, None):
+            if field:
+                term_prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(field))
+            else:
+                term_prefix = prefix
+            for term in serialise_value(term):
+                if term:
+                    if position is None:
+                        document.add_term(term_prefix + term, weight)
+                    else:
+                        document.add_posting(term_prefix + term, position, weight)
 
     for text in document_texts or ():
         if isinstance(text, (tuple, list)):

@@ -8,7 +8,7 @@ except ImportError:
     import pickle
 
 from xapiand import Xapian
-from xapiand.core import get_slot, DOCUMENT_ID_TERM_PREFIX, DOCUMENT_CUSTOM_TERM_PREFIX
+from xapiand.core import get_slot, expand_terms, DOCUMENT_CUSTOM_TERM_PREFIX
 from xapiand.serialise import LatLongCoord
 from xapiand.results import XapianResults
 
@@ -16,11 +16,11 @@ from haystack import connections
 from haystack.constants import ID, DEFAULT_ALIAS
 from haystack.backends import BaseEngine, BaseSearchBackend, BaseSearchQuery, log_query
 from haystack.models import SearchResult
-from haystack.utils import get_identifier
+from haystack.utils import get_identifier, get_model_ct
 
 from django.core.exceptions import ImproperlyConfigured
 
-DOCUMENT_CT_FIELD = 'content_type'
+DOCUMENT_CT_FIELD = 'django_ct'
 DOCUMENT_AC_FIELD = 'ac'
 DOCUMENT_TAGS_FIELD = 'tags'
 
@@ -52,6 +52,8 @@ def consistent_hash(key, num_buckets):
     assert consistent_hash(0xDEAD10CC, 666) == 361
 
     """
+    if num_buckets == 1:
+        return 0
     if not isinstance(key, (int, long)):
         if isinstance(key, unicode):
             key = key.encode('utf-8')
@@ -73,6 +75,18 @@ class XapianSearchResults(XapianResults):
 
 
 class XapianSearchBackend(BaseSearchBackend):
+    RESERVED_WORDS = (
+        'AND',
+        'NOT',
+        'OR',
+        'LIMIT',
+        'OFFSET',
+        'TERMS',
+        'PARTIAL',
+        'ORDER',
+        'BY',
+    )
+
     def __init__(self, connection_alias, language=None, **connection_options):
         super(XapianSearchBackend, self).__init__(connection_alias, **connection_options)
 
@@ -120,11 +134,11 @@ class XapianSearchBackend(BaseSearchBackend):
 
                     if field_type == 'text':
                         if field['mode'] == 'autocomplete':  # mode = content, autocomplete, tagged
-                            _prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(DOCUMENT_AC_FIELD))
-                            document_terms.append(dict(term=value, weight=weight, prefix=_prefix))
+                            term_prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(DOCUMENT_AC_FIELD))
+                            document_terms.append(dict(term=value, weight=weight, prefix=term_prefix))
                         elif field['mode'] == 'tagged':
-                            _prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(DOCUMENT_TAGS_FIELD))
-                            document_terms.append(dict(term=value, weight=weight, prefix=_prefix))
+                            term_prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(DOCUMENT_TAGS_FIELD))
+                            document_terms.append(dict(term=value, weight=weight, prefix=term_prefix))
                         else:
                             document_texts.append(dict(text=value, weight=weight, prefix=prefix))
 
@@ -152,13 +166,12 @@ class XapianSearchBackend(BaseSearchBackend):
                         pass
 
         document_data = pickle.dumps((obj._meta.app_label, obj._meta.module_name, obj.pk, data))
-        document_id = DOCUMENT_ID_TERM_PREFIX + get_identifier(obj)
 
-        _prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(DOCUMENT_CT_FIELD))
-        document_terms.append(dict(term='%s__%s' % (obj._meta.app_label, obj._meta.module_name), weight=0, prefix=_prefix))
+        term_prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(DOCUMENT_CT_FIELD))
+        document_terms.append(dict(term=get_model_ct(obj), weight=0, prefix=term_prefix))
 
+        document_id = get_identifier(obj)
         endpoint = self.endpoints[consistent_hash(document_id, len(self.endpoints))]
-
         self.xapian.index(
             id=document_id,
             data=document_data,
@@ -212,7 +225,7 @@ class XapianSearchBackend(BaseSearchBackend):
         if models:
             if not terms:
                 terms = set()
-            terms.update('%s:%s__%s' % (DOCUMENT_CT_FIELD, model._meta.app_label, model._meta.module_name) for model in models)
+            terms.update('%s:%s.%s' % (DOCUMENT_CT_FIELD, model._meta.app_label, model._meta.module_name) for model in models)
 
         query_string = query_string.replace('### AND ###', '').replace('###', '').replace('()', '')
         results = self.xapian.search(
@@ -341,7 +354,7 @@ class XapianSearchQuery(BaseSearchQuery):
                 self.partials.append(' '.join('%s:%s' % (field, v) for v in value.split()))
                 value = '###'
             elif field == DOCUMENT_TAGS_FIELD:
-                self.terms.add(value)
+                self.terms.add(expand_terms(value, field))
                 value = '###'
             else:
                 value = '%s:"%s"' % (field, value)
