@@ -14,6 +14,10 @@ class ConnectionError(ServerError):
     pass
 
 
+class NewConnection(ConnectionError):
+    pass
+
+
 class InvalidIndexError(XapianError):
     """Raised when an index can not be opened."""
     pass

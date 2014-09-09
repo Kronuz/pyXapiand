@@ -10,12 +10,7 @@ import socket
 from errno import EISCONN, EINVAL, ECONNREFUSED
 from functools import wraps
 
-try:
-    from cStringIO import StringIO
-except ImportError:
-    from StringIO import StringIO
-
-from ..exceptions import ConnectionError
+from ..exceptions import ConnectionError, NewConnection
 
 # Sentinel used to mark an empty slot in the ConnectionPool queue.
 # Using sys.maxint as the timestamp ensures that empty slots will always
@@ -41,24 +36,13 @@ def log_command(func):
     return wrapped
 
 
-def command(threaded=False, **kwargs):
+def command(func=False, **kwargs):
     def _command(func):
         func.command = func.__name__
-        func.threaded = threaded
         for attr, value in kwargs.items():
             setattr(func, attr, value)
-        if threaded:
-            @wraps(func)
-            def wrapped(self, _sock, *args, **kwargs):
-                client_socket = socket.socket(_sock=_sock)  # Create a gevent socket from the raw socket
-                self.client_socket = client_socket
-                self.socket_file = client_socket.makefile()
-                return func(self, *args, **kwargs)
-            return wrapped
-        else:
-            return func
-    if callable(threaded):
-        func, threaded = threaded, False
+        return func
+    if callable(func):
         return _command(func)
     return _command
 
@@ -146,6 +130,8 @@ def with_retry(func):
         while retries < self.max_connect_retries:
             try:
                 return func(self, *args, **kw)
+            except NewConnection:
+                continue
             except (IOError, RuntimeError, socket.error, ConnectionError):
                 exc_info = sys.exc_info()
                 time.sleep(delay)
@@ -162,7 +148,7 @@ class Connection(object):
 
     def __init__(self, pool, host='localhost', port=1234, endpoints=None,
                  max_connect_retries=5, reconnect_delay=0.5,
-                 socket_timeout=None, encoding='utf-8',
+                 socket_timeout=3, encoding='utf-8',
                  encoding_errors='strict'):
         self.pool = pool
         self.host = host
@@ -173,8 +159,8 @@ class Connection(object):
         self.socket_timeout = socket_timeout
         self.encoding = encoding
         self.encoding_errors = encoding_errors
-        self._sock = None
-        self._file = None
+        self.client_socket = None
+        self.socket_file = None
         self.cmd_id = 0
 
     def __del__(self):
@@ -200,7 +186,7 @@ class Connection(object):
         pass
 
     def connect(self):
-        if not self._sock:
+        if not self.client_socket:
             try:
                 sock = self._connect()
             except socket.error:
@@ -210,9 +196,10 @@ class Connection(object):
                     ConnectionError,
                     ConnectionError(self._error_message(e)),
                     exc_info[2])
-            self._sock = sock
-        if not self._file:
-            self._file = self._sock.makefile('rb')
+            self.client_socket = sock
+        if not self.socket_file:
+            self.socket_file = self.client_socket.makefile()
+        self.cmd_id = 0
         self.on_connect()
 
     def _connect(self):
@@ -245,22 +232,26 @@ class Connection(object):
     def disconnect(self):
         "Disconnects from the server"
         self.on_disconnect()
-        if self._file is not None:
-            self._file.close()
-            self._file = None
-        if self._sock is not None:
+        self.cmd_id = 0
+        if self.socket_file is not None:
+            self.socket_file.close()
+            self.socket_file = None
+        if self.client_socket is not None:
             try:
-                self._sock.shutdown(socket.SHUT_RDWR)
-                self._sock.close()
+                self.client_socket.shutdown(socket.SHUT_RDWR)
+                self.client_socket.close()
             except socket.error:
                 pass
-            self._sock = None
+            self.client_socket = None
 
     def send(self, body):
-        if not self._sock:
+        if not self.client_socket:
             self.connect()
+            raise NewConnection("New connection made!")
+        # print '<<<<---', id(self), '%s:%s' % (self.address[0], self.address[1]), repr(body)
         try:
-            self._sock.send(body)
+            self.socket_file.write(body)
+            self.socket_file.flush()
         except socket.error:
             self.disconnect()
             exc_info = sys.exc_info()
@@ -277,33 +268,17 @@ class Connection(object):
             self.disconnect()
             raise
 
-    def read(self, length=None):
+    def read(self):
         "Read the response from a previously sent command"
         cmd_id = self.cmd_id
         while True:
             try:
-                if length is not None:
-                    bytes_left = length + 2  # read the line ending
-                    if length > self.MAX_READ_LENGTH:
-                        # apparently reading more than 1MB or so from a windows
-                        # socket can cause MemoryErrors. Read smaller chunks at a
-                        # time to work around this.
-                        try:
-                            buf = StringIO()
-                            while bytes_left > 0:
-                                read_len = min(bytes_left, self.MAX_READ_LENGTH)
-                                buf.write(self._file.read(read_len))
-                                bytes_left -= read_len
-                            buf.seek(0)
-                            response = buf.read(length)
-                        finally:
-                            buf.close()
-                    else:
-                        response = self._file.read(bytes_left)[:-2]
-                else:
-                    # no length, read a full line
-                    response = self._file.readline()[:-2]
-                # print '--->>>>', repr(response)
+                response = self.socket_file.readline()
+                if not response:
+                    self.disconnect()
+                    raise ConnectionError("No response!")
+                response = response[:-2]
+                # print '--->>>>', id(self), '%s:%s' % (self.address[0], self.address[1]), repr(response)
                 if response:
                     if response[0] in (b"#", b" "):
                         continue
@@ -336,9 +311,14 @@ class Connection(object):
     def execute_command(self, command_name, *args):
         self.cmd_id += 1
         command = self.pack_command(command_name, *args)
-        # print '<<<<---', repr(command)
         self.send(command.encode(self.encoding, self.encoding_errors))
         return self.read()
+
+    @property
+    def address(self):
+        if self.client_socket:
+            return self.client_socket.getsockname()
+        return ('', '')
 
 
 class ServerPool(object):
