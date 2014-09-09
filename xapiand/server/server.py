@@ -682,7 +682,8 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
             log.warning("Sending the signal again will terminate all running tasks! (%s)", sig)
 
         stopped = STOPPED
-        PQueue.STOPPED = STOPPED = now
+        if not stopped:
+            PQueue.STOPPED = STOPPED = now
 
         if sig:
             if stopped:
@@ -690,7 +691,7 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
                     log.error("Killing process!...")
                     sys.exit(-1)
                     return
-                if now - stopped > 2:
+                if now - stopped > 1:
                     log.error("Forcing shutdown...")
                     server.close()
             else:
