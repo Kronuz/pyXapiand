@@ -135,7 +135,7 @@ class XapianSearchBackend(BaseSearchBackend):
                     if field_type == 'text':
                         if field['mode'] == 'autocomplete':  # mode = content, autocomplete, tagged
                             term_prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(DOCUMENT_AC_FIELD))
-                            document_terms.append(dict(term=value, weight=weight, prefix=term_prefix))
+                            document_terms.append(dict(term=value.lower(), weight=weight, prefix=term_prefix))
                         elif field['mode'] == 'tagged':
                             term_prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(DOCUMENT_TAGS_FIELD))
                             document_terms.append(dict(term=value, weight=weight, prefix=term_prefix))
@@ -156,9 +156,19 @@ class XapianSearchBackend(BaseSearchBackend):
                         document_values[field_name] = value
 
                     elif field_type == 'boolean':
+                        document_terms.append(dict(term=bool(value), weight=weight, prefix=prefix))
+
+                    elif field_type in ('integer', 'long'):
+                        value = int(value)
+                        document_values[field_name] = value
                         document_terms.append(dict(term=value, weight=weight, prefix=prefix))
 
-                    elif field_type in ('date', 'integer', 'long', 'float'):
+                    elif field_type in ('float'):
+                        value = float(value)
+                        document_values[field_name] = value
+                        document_terms.append(dict(term=value, weight=weight, prefix=prefix))
+
+                    elif field_type in ('date'):
                         document_values[field_name] = value
                         document_terms.append(dict(term=value, weight=weight, prefix=prefix))
 

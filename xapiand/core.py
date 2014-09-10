@@ -36,7 +36,8 @@ def find_terms(value, field=None):
 def expand_terms(value, field=None, connector=' AND '):
     all_terms = {}
     for term, term_field, terms in find_terms(value, None):
-        all_terms.setdefault((term_field, terms), []).append(term)
+        if term_field.lower() == term_field:
+            all_terms.setdefault((term_field, terms), []).append(term)
     replacements = []
     for (term_field, terms), terms_list in all_terms.items():
         if terms[0] == '"':
@@ -59,7 +60,10 @@ def expand_terms(value, field=None, connector=' AND '):
 
 def get_slot(name):
     if KEY_RE.match(name):
-        return int(md5(name.lower()).hexdigest(), 16) & 0xffffffff
+        _name = name.lower()
+        if _name != name:
+            _name = name.upper()
+        return int(md5(_name).hexdigest(), 16) & 0xffffffff
 
 
 def _xapian_subdatabase(subdatabases, db, writable, create, data='.', log=logging):
@@ -291,7 +295,7 @@ def xapian_index(database, db, document, commit=False, data='.', log=logging):
     document = xapian.Document()
 
     for name, value in (document_values or {}).items():
-        name = name.strip().lower()
+        name = name.strip()
         slot = get_slot(name)
         if slot:
             value = serialise_value(value)[0]
@@ -317,11 +321,15 @@ def xapian_index(database, db, document, commit=False, data='.', log=logging):
 
         for term, field, terms in find_terms(terms, None):
             if field:
+                lower = field.lower() == field
                 term_prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(field))
             else:
+                lower = False
                 term_prefix = prefix
             for term in serialise_value(term):
                 if term:
+                    if lower:
+                        term = term.lower()
                     if position is None:
                         document.add_term(term_prefix + term, weight)
                     else:

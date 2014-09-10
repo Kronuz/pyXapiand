@@ -38,7 +38,10 @@ class Search(object):
             for term, term_field, terms in find_terms(string):
                 if term_field and term_field not in prefixes:
                     prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(term_field))
-                    queryparser.add_prefix(term_field, prefix)
+                    if term_field.lower() == term_field:
+                        queryparser.add_prefix(term_field, prefix)
+                    else:
+                        queryparser.add_boolean_prefix(term_field, prefix)
                     prefixes.add(term_field)
 
         # Build final query:
