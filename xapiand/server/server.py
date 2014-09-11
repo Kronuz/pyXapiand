@@ -60,20 +60,23 @@ class Obj(object):
         self.__dict__ = kwargs
 
 
-class XapianForwarder(PortForwarder):
+class XapiandForwarder(PortForwarder):
     def __init__(self, *args, **kwargs):
-        super(XapianForwarder, self).__init__(*args, **kwargs)
+        super(XapiandForwarder, self).__init__(*args, **kwargs)
+        address = self.address[0] or '0.0.0.0'
+        port = self.address[1]
+        self.log.info("Xapiand Forwarder Listening to %s:%s", address, port)
 
     def create_connection(self):
         return create_connection(('127.0.0.0', 8901))
 
 
-class XapianReceiver(CommandReceiver):
+class XapiandReceiver(CommandReceiver):
     welcome = "# Welcome to Xapiand! Type QUIT to exit, HELP for help."
 
     def __init__(self, *args, **kwargs):
         data = kwargs.pop('data', '.')
-        super(XapianReceiver, self).__init__(*args, **kwargs)
+        super(XapiandReceiver, self).__init__(*args, **kwargs)
         self._do_reopen = False
         self._do_init = set()
         self._inited = set()
@@ -87,7 +90,7 @@ class XapianReceiver(CommandReceiver):
             return
         if getattr(func, 'reopen', False) and self._do_reopen:
             self._reopen()
-        super(XapianReceiver, self).dispatch(func, line, command)
+        super(XapiandReceiver, self).dispatch(func, line, command)
 
     def _reopen(self, create=False, endpoints=None):
         endpoints = endpoints or self.active_endpoints
@@ -427,16 +430,16 @@ class XapianReceiver(CommandReceiver):
         self.sendLine(">> OK: %d active databases::\n%s" % (size, "\n".join(lines)))
 
 
-class XapianServer(CommandServer):
-    receiver_class = XapianReceiver
+class XapiandServer(CommandServer):
+    receiver_class = XapiandReceiver
 
     def __init__(self, *args, **kwargs):
         self.data = kwargs.pop('data', '.')
         self.databases_pool = kwargs.pop('databases_pool')
-        super(XapianServer, self).__init__(*args, **kwargs)
+        super(XapiandServer, self).__init__(*args, **kwargs)
         address = self.address[0] or '0.0.0.0'
         port = self.address[1]
-        self.log.info("Listening to %s:%s", address, port)
+        self.log.info("Xapiand Server Listening to %s:%s", address, port)
 
     def buildClient(self, client_socket, address):
         return self.receiver_class(self, client_socket, address, data=self.data, log=self.log)
@@ -649,7 +652,7 @@ def forwarder_run(loglevel, log_queue, address, port):
 
     log.warning("Starting Xapiand Forwarder (pid:%s)", os.getpid())
 
-    xapian_forwarder = XapianForwarder((address, port))
+    xapian_forwarder = XapiandForwarder((address, port))
 
     def _server_stop(sig=None):
         global STOPPED
@@ -716,7 +719,7 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
     databases_pool = DatabasesPool()
     databases = {}
 
-    xapian_server = XapianServer((address, port), databases_pool=databases_pool, data=data, log=log)
+    xapian_server = XapiandServer((address, port), databases_pool=databases_pool, data=data, log=log)
 
     def _server_stop(sig=None):
         global STOPPED

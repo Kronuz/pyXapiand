@@ -343,11 +343,11 @@ class PortForwarder(StreamServer):
         raise NotImplementedError
 
     def handle(self, client_socket, address):
-        self.log.debug("%s:%s accepted", *address[:2])
+        self.log.info("New connection from %s:%d (%d open sockets)" % (address[0], address[1], len(self.sockets)))
         try:
             server_socket = self.create_connection()
         except IOError as ex:
-            self.log.debug("%s:%s failed to connect to %s:%s: %s", address[0], address[1], self.server_socket[0], self.server_socket[1], ex)
+            self.log.error("%s:%s failed to connect to %s:%s: %s", address[0], address[1], self.server_socket[0], self.server_socket[1], ex)
             return
 
         gevent.spawn(self.forward, client_socket, server_socket)
