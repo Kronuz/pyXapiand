@@ -15,7 +15,7 @@ from gevent import queue
 
 from .. import version, json
 from ..exceptions import InvalidIndexError, XapianError
-from ..core import DatabasesPool, xapian_database, xapian_cleanup, xapian_close, xapian_commit, xapian_index, xapian_delete
+from ..core import DatabasesPool, xapian_database, xapian_cleanup, xapian_close, xapian_commit, xapian_index, xapian_delete, xapian_spawn, DATABASE_MAX_LIFE
 from ..platforms import create_pidlock
 from ..utils import parse_url, build_url, format_time
 from ..parser import index_parser, search_parser
@@ -43,7 +43,6 @@ LOG_FORMAT = "[%(asctime)s: %(levelname)s/%(processName)s:%(threadName)s] %(mess
 
 STOPPED = 0
 COMMIT_TIMEOUT = 1
-DATABASE_MAX_LIFE = 4#00  # stop writer adter 15 minutes of inactivity
 
 WRITERS_FILE = 'Xapian-Writers.db'
 QUEUE_WORKER_MAIN = 'Xapian-Worker'
@@ -82,6 +81,7 @@ class XapiandReceiver(CommandReceiver):
 
     def _reopen(self, create=False, endpoints=None):
         endpoints = endpoints or self.active_endpoints
+
         with xapian_database(self.databases_pool, endpoints, writable=False, create=create, reopen=True, data=self.data, log=self.log):
             self._do_reopen = False
             self._do_init.add(endpoints)
@@ -386,6 +386,13 @@ class XapiandReceiver(CommandReceiver):
         self.sendLine(">> OK")
         self._init()
 
+    @command(internal=True)
+    def spawn(self, line=''):
+        time_, address = xapian_spawn(line, data=self.data, log=self.log)
+        server = "%s %s:%s" % (time_, address[0], address[1])
+        self.sendLine(">> OK: %s" % server)
+        return server
+
     @command(db=True)
     def endpoints(self, line=''):
         endpoints = self.active_endpoints or []
@@ -425,7 +432,7 @@ class XapiandServer(CommandServer):
         self.data = kwargs.pop('data', '.')
         self.databases_pool = kwargs.pop('databases_pool')
         super(XapiandServer, self).__init__(*args, **kwargs)
-        address = self.address[0] or '0.0.0.0'
+        address = self.address[0] or '127.0.0.1'
         port = self.address[1]
         self.log.info("Xapiand Server Listening to %s:%s", address, port)
 

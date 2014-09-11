@@ -199,6 +199,14 @@ class XapianConnection(Connection):
     def commit(self):
         return self._response(self.execute_command('COMMIT'))
 
+    @command
+    def spawn(self, db):
+        response = self._response(self.execute_command('SPAWN', db))
+        time_, _, address = response.partition(' ')
+        host, _, port = address.partition(':')
+        time_, address = float(time_), (host, int(port))
+        return time_, address
+
 
 class Xapian(ServerPool):
     connection_class = XapianConnection
