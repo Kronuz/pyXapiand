@@ -34,7 +34,8 @@ def parse_url(url):
     hostname = unquote(parts.hostname or '')
     path = unquote(parts.path or '')
     if parts.scheme:
-        path = path.lstrip('/')
+        if path[0] == '/':
+            path = path[1:]
         scheme = parts.scheme
         if scheme == 'file':
             path, hostname = hostname + '/' + path, ''
