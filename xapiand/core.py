@@ -5,6 +5,7 @@ import re
 import time
 import logging
 import threading
+import subprocess
 from hashlib import md5
 from collections import deque
 from contextlib import contextmanager
@@ -14,7 +15,7 @@ import xapian
 from .exceptions import InvalidIndexError
 from .serialise import serialise_value, normalize
 from .utils import parse_url, build_url
-
+from .platforms import pid_exists
 
 DOCUMENT_ID_TERM_PREFIX = 'Q'
 DOCUMENT_CUSTOM_TERM_PREFIX = 'X'
@@ -66,6 +67,20 @@ def get_slot(name):
         return int(md5(_name).hexdigest(), 16) & 0xffffffff
 
 
+def _xapian_spawn(address, database, data='.', log=logging):
+    args = ['xapian-tcpsrv', '--interface=%s' % address[0], '--port=%s' % address[1], '--writable', '--quiet', database]
+    FNULL = open(os.devnull, 'w')
+    try:
+        process = subprocess.Popen(args, stdout=FNULL, stderr=subprocess.STDOUT)
+        log.info("Spawned xapian TCP server: \"%s\" (pid:%s)", database, process.pid)
+        return process
+    except Exception as e:
+        log.error("Can't exec %r: %s", ' '.join(args), e)
+        raise IOError("Cannot spawn xapian TCP server process")
+    finally:
+        time.sleep(0.1)
+
+
 def _xapian_subdatabase(subdatabases, db, writable, create, data='.', log=logging):
     parse = parse_url(db)
     scheme, hostname, port, username, password, path, query, query_dict = parse
@@ -73,9 +88,30 @@ def _xapian_subdatabase(subdatabases, db, writable, create, data='.', log=loggin
     try:
         return subdatabases[(writable, key)], False
     except KeyError:
+        if path and not path.startswith('/'):
+            path = os.path.join(data, path)
         if scheme == 'file':
             database = _xapian_database_open(path, writable, create, data, log)
         elif scheme == 'xapian':
+            if path:
+                try:
+                    server = tcpservers[db]
+                    if not pid_exists(server.process.pid):
+                        raise KeyError
+                except KeyError:
+                    address = ('127.0.0.1', 8900 + len(tcpservers))
+                    try:
+                        process = _xapian_spawn(address, path, data=data, log=log)
+                        server = TcpDatabase(path, process, address)
+                        tcpservers[db] = server
+                    except IOError:
+                        try:
+                            server = tcpservers[db]
+                            if not pid_exists(server.process.pid):
+                                raise KeyError
+                        except KeyError:
+                            raise InvalidIndexError("Cannot spawn xapian TCP server process")
+                hostname, port = server.address
             timeout = int(query_dict.get('timeout', 0))
             database = _xapian_database_connect(hostname, port or 8891, timeout, writable, data, log)
         else:
@@ -156,17 +192,24 @@ def _xapian_database(endpoints, writable, create, data='.', log=logging):
     return database
 
 
-class DatabasesPoolQueue(object):
+class CleanableObject(object):
     def __init__(self):
         self.lock = threading.RLock()
         self.time = time.time()
-        self.unused = deque()
-        self.used = deque()
+        self.used = False
+        self.cleaned = False
+
+    def __del__(self):
+        self.cleanup()
+
+    def cleanup(self, data='.', log=logging):
+        # self.cleaned = True
+        raise NotImplementedError
 
 
-class DatabasesPool(dict):
+class CleanablePool(dict):
     def __init__(self, *args, **kwargs):
-        super(DatabasesPool, self).__init__(*args, **kwargs)
+        super(CleanablePool, self).__init__(*args, **kwargs)
         self.lock = threading.RLock()
         self.time = time.time()
 
@@ -180,16 +223,46 @@ class DatabasesPool(dict):
             return
 
         with self.lock:
-            removed_queues = []
-            for (writable, endpoints), pool_queue in list(self.items()):
-                if not len(pool_queue.used) and now - pool_queue.time > timeout:
-                    removed_queues.append(pool_queue)
-                    del self[(writable, endpoints)]
+            cleanups = []
+            for key, obj in list(self.items()):
+                if not obj.used and now - obj.time > timeout:
+                    cleanups.append(obj)
+                    del self[key]
             self.time = now
 
-        for pool_queue in removed_queues:
-            for database in pool_queue.unused:
+        for obj in cleanups:
+            obj.cleanup()
+
+
+class TcpDatabase(CleanableObject):
+    def __init__(self, database, process, address):
+        super(TcpDatabase, self).__init__()
+        self.database = database
+        self.process = process
+        self.address = address
+
+    def cleanup(self, data='.', log=logging):
+        if not self.cleaned:
+            log.debug("Stopping xapian TCP server: \"%s\" (pid:%s)...", self.database, self.process.pid)
+            self.process.kill()
+            self.cleaned = True
+
+
+class DatabasesPoolQueue(CleanableObject):
+    def __init__(self):
+        super(DatabasesPoolQueue, self).__init__()
+        self.unused = deque()
+        self.used = deque()
+
+    def cleanup(self, data='.', log=logging):
+        if not self.cleaned:
+            for database in self.unused:
                 xapian_close(database, data=data, log=log)
+            self.cleaned = True
+
+
+class DatabasesPool(CleanablePool):
+    pass
 
 
 @contextmanager
@@ -201,6 +274,14 @@ def xapian_database(databases_pool, endpoints, writable, create=False, reopen=Fa
     database = None
     new = False
     endpoints = tuple(build_url(*parse_url(db.strip())) for db in endpoints)
+
+    with tcpservers.lock:
+        now = time.time()
+        for db in endpoints:
+            try:
+                tcpservers[db].time = now
+            except KeyError:
+                pass
 
     with databases_pool.lock:
         pool_queue = databases_pool.setdefault((writable, endpoints), DatabasesPoolQueue())
@@ -402,3 +483,11 @@ def xapian_commit(database, db, data='.', log=logging):
 
     subdatabase.commit()
     log.debug('Commit executed: %s', db)
+
+
+def xapian_cleanup(databases_pool, timeout, data='.', log=logging):
+    tcpservers.cleanup(timeout, data=data, log=log)
+    databases_pool.cleanup(timeout, data=data, log=log)
+
+
+tcpservers = CleanablePool()
