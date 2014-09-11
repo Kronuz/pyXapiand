@@ -17,7 +17,7 @@ from gevent.socket import create_connection
 from .. import version, json
 from ..exceptions import InvalidIndexError, XapianError
 from ..core import DatabasesPool, xapian_database, xapian_close, xapian_commit, xapian_index, xapian_delete
-from ..platforms import create_pidlock
+from ..platforms import create_pidlock, pid_exists
 from ..utils import parse_url, build_url, format_time
 from ..parser import index_parser, search_parser
 from ..search import Search
@@ -66,9 +66,39 @@ class XapiandForwarder(PortForwarder):
         address = self.address[0] or '0.0.0.0'
         port = self.address[1]
         self.log.info("Xapiand Forwarder Listening to %s:%s", address, port)
+        self.servers = {}
+
+    def __del__(self):
+        for database, (pid, address) in self.servers.items():
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
 
     def create_connection(self):
-        return create_connection(('127.0.0.1', 8901))
+        database = 'example'
+        try:
+            pid, address = self.servers[database]
+            if not pid_exists(pid):
+                raise KeyError
+        except KeyError:
+            address = ('127.0.0.1', 8900 + len(self.servers))
+            pid = self.spawn(address, database)
+            self.servers[database] = (pid, address)
+        self.server_address = address
+        return create_connection(address)
+
+    def spawn(self, address, database):
+        try:
+            path = 'xapian-tcpsrv'
+            args = ['--interface=%s' % address[0], '--port=%s' % address[1], '--writable', '--quiet', database]
+            self.log.debug("Spawning %r", ' '.join([path] + args))
+            return os.spawnvp(os.P_NOWAIT, path, args)
+        except Exception as e:
+            self.log.error("Can't exec %r: %s", ' '.join([path] + args), e)
+            raise IOError("Cannot spawn xapian tcp server process")
+        finally:
+            time.sleep(1)
 
 
 class XapiandReceiver(CommandReceiver):
