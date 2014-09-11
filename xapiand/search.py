@@ -239,7 +239,7 @@ class Search(object):
             self.database = xapian_reopen(self.database, data=self.data, log=self.log)
             try:
                 enquire = self.get_enquire(self.database)
-                matches = self.enquire.get_mset(self.first, maxitems, check_at_least)
+                matches = enquire.get_mset(self.first, maxitems, check_at_least)
             except (xapian.NetworkError, xapian.DatabaseError) as e:
                 raise XapianError(e)
 
