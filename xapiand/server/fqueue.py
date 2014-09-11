@@ -84,9 +84,7 @@ class FileQueue(object):
                 fname = '%s.%s' % (self.name, fnum)
                 os.unlink(fname)
                 # self.log.debug("Cleaned up file: %s", fname)
-            except (KeyboardInterrupt, SystemExit):
-                raise
-            except:
+            except Exception:
                 pass
             fnum -= 1
 

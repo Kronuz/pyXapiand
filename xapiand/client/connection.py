@@ -264,7 +264,7 @@ class Connection(object):
                 ConnectionError,
                 ConnectionError("Error %s while writing to socket. %s." % (_errno, errmsg)),
                 exc_info[2])
-        except:
+        except Exception:
             self.disconnect()
             raise
 

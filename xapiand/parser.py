@@ -75,9 +75,7 @@ def index_parser(document):
         return ">> ERR: [400] You must provide 'data' to index"
     try:
         document_data = json.dumps(document_data, ensure_ascii=False).encode('safe-utf-8')
-    except (KeyboardInterrupt, SystemExit):
-        raise
-    except:
+    except Exception:
         return ">> ERR: [400] 'data' must be a valid json serializable object"
 
     default_language = document.pop('language', None)

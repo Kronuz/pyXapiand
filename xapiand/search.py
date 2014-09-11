@@ -287,9 +287,7 @@ class Search(object):
                     continue
                 try:
                     data = json.loads(data)
-                except (KeyboardInterrupt, SystemExit):
-                    raise
-                except:
+                except Exception:
                     data = base64.b64encode(data)
                 result.update({
                     'data': data,

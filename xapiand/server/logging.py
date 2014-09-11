@@ -27,9 +27,7 @@ class QueueHandler(logging.Handler):
                 self.format(record)  # just to get traceback text into record.exc_text
                 record.exc_info = None  # not needed any more
             self.queue.put_nowait(record)
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except:
+        except Exception:
             self.handleError(record)
 
 
