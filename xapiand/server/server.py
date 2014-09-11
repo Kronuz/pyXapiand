@@ -68,7 +68,7 @@ class XapiandForwarder(PortForwarder):
         self.log.info("Xapiand Forwarder Listening to %s:%s", address, port)
 
     def create_connection(self):
-        return create_connection(('127.0.0.0', 8901))
+        return create_connection(('127.0.0.1', 8901))
 
 
 class XapiandReceiver(CommandReceiver):
