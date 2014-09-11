@@ -58,6 +58,8 @@ class XapianJSONEncoder(json.JSONEncoder):
     def default(self, obj):
         try:
             return self.ENCODER_BY_TYPE[type(obj)](obj)
+        except (KeyboardInterrupt, SystemExit):
+            raise
         except:
             return super(XapianJSONEncoder, self).default(obj)
 
@@ -76,6 +78,8 @@ def parse_string(s):
         if r.match(s):
             try:
                 return d(s)
+            except (KeyboardInterrupt, SystemExit):
+                raise
             except:
                 pass
     raise ValueError

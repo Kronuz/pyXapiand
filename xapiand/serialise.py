@@ -3,7 +3,7 @@ import unicodedata
 
 try:
     from xapian import LatLongCoord
-except:
+except ImportError:
     class LatLongCoord(object):
         def __init__(self, latitude, longitude=None):
             if longitude is None:
@@ -19,7 +19,7 @@ except:
 
 try:
     from xapian import sortable_serialise
-except:
+except ImportError:
     def sortable_serialise(value):
         return "%s" % value
 

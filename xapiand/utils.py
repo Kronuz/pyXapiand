@@ -99,8 +99,12 @@ def isoparse(ds):
             offset = ds[26:].replace(':', '')
             delta = datetime.timedelta(hours=int(offset[:-2]), minutes=int(offset[-2:]))
             dt = dt.replace(tzinfo=tzoffset(None, int(delta.total_seconds())))
+        except (KeyboardInterrupt, SystemExit):
+            raise
         except:
             pass
+    except (KeyboardInterrupt, SystemExit):
+        raise
     except:
         try:
             dt = datetime.datetime.strptime(ds[:19].replace(' ', 'T'), '%Y-%m-%dT%H:%M:%S')
@@ -108,17 +112,27 @@ def isoparse(ds):
                 offset = ds[19:].replace(':', '')
                 delta = datetime.timedelta(hours=int(offset[:-2]), minutes=int(offset[-2:]))
                 dt = dt.replace(tzinfo=tzoffset(None, int(delta.total_seconds())))
+            except (KeyboardInterrupt, SystemExit):
+                raise
             except:
                 pass
+        except (KeyboardInterrupt, SystemExit):
+            raise
         except:
             try:
                 dt = datetime.datetime.strptime(ds[:15], '%H:%M:%S.%f')
+            except (KeyboardInterrupt, SystemExit):
+                raise
             except:
                 try:
                     dt = datetime.datetime.strptime(ds[:8], '%H:%M:%S')
+                except (KeyboardInterrupt, SystemExit):
+                    raise
                 except:
                     try:
                         dt = datetime.datetime.strptime(ds[:8], '%H:%M')
+                    except (KeyboardInterrupt, SystemExit):
+                        raise
                     except:
                         dt = datetime.datetime.strptime(ds[:10], '%Y-%m-%d')
     return dt

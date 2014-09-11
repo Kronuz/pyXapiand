@@ -86,6 +86,8 @@ def get_fdmax(default=None):
     """
     try:
         return os.sysconf('SC_OPEN_MAX')
+    except (KeyboardInterrupt, SystemExit):
+        raise
     except:
         pass
     if resource is None:  # Windows
