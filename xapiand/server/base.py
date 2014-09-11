@@ -6,6 +6,7 @@ import logging
 
 from functools import wraps
 
+import gevent
 from gevent import socket
 from gevent.server import StreamServer
 from gevent.threadpool import ThreadPool
@@ -306,3 +307,58 @@ class CommandReceiver(ClientReceiver):
             # Indent and send results:
             doc = self.delimiter.join("    " + l for l in doc)
             self.sendLine(">> OK: %s::\n%s" % (cmd.upper(), doc))
+
+
+class PortForwarder(StreamServer):
+    def __init__(self, *args, **kwargs):
+        log = kwargs.pop('log', logging)
+        super(PortForwarder, self).__init__(*args, **kwargs)
+        self.log = log
+        self.sockets = set()
+
+    def forward(self, source, dest):
+        self.sockets.add(source)
+        self.sockets.add(dest)
+
+        source_address = "%s:%s" % source.getpeername()[:2]
+        dest_address = "%s:%s" % dest.getpeername()[:2]
+        try:
+            while True:
+                try:
+                    data = source.recv(4096)
+                except socket.error:
+                    data = None
+                if not data:
+                    break
+                self.log.debug("%s->%s: %r", source_address, dest_address, data)
+                dest.sendall(data)
+        finally:
+            self.sockets.discard(source)
+            self.sockets.discard(dest)
+            source.close()
+            dest.close()
+
+    def create_connection(self):
+        # return create_connection(...)
+        raise NotImplementedError
+
+    def handle(self, client_socket, address):
+        self.log.debug("%s:%s accepted", *address[:2])
+        try:
+            server_socket = self.create_connection()
+        except IOError as ex:
+            self.log.debug("%s:%s failed to connect to %s:%s: %s", address[0], address[1], self.server_socket[0], self.server_socket[1], ex)
+            return
+
+        gevent.spawn(self.forward, client_socket, server_socket)
+        gevent.spawn(self.forward, server_socket, client_socket)
+        # XXX only one spawn() is needed
+
+    def close(self):
+        if self.closed:
+            self.log.debug("Closing forward sockets...")
+            for sock in self.sockets:
+                sock._sock.close()
+        else:
+            self.log.debug("Closing listener socket. Waiting for forwarded clients...")
+            super(PortForwarder, self).close()

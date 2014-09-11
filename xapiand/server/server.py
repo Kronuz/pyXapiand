@@ -12,6 +12,7 @@ import multiprocessing
 
 import gevent
 from gevent import queue
+from gevent.socket import create_connection
 
 from .. import version, json
 from ..exceptions import InvalidIndexError, XapianError
@@ -21,7 +22,7 @@ from ..utils import parse_url, build_url, format_time
 from ..parser import index_parser, search_parser
 from ..search import Search
 
-from .base import CommandReceiver, CommandServer, command
+from .base import PortForwarder, CommandReceiver, CommandServer, command
 from .logging import QueueHandler, ColoredStreamHandler
 try:
     from .redis import RedisQueue
@@ -57,6 +58,14 @@ PQueue = None
 class Obj(object):
     def __init__(self, **kwargs):
         self.__dict__ = kwargs
+
+
+class XapianForwarder(PortForwarder):
+    def __init__(self, *args, **kwargs):
+        super(XapianForwarder, self).__init__(*args, **kwargs)
+
+    def create_connection(self):
+        return create_connection(('127.0.0.0', 8901))
 
 
 class XapianReceiver(CommandReceiver):
@@ -598,65 +607,103 @@ def _writer_loop(databases, databases_pool, db, tq, commit_lock, timeouts, data,
     log.debug("Writer %s ended! ~ lived for %s", name, format_time(time.time() - start))
 
 
-def logging_run(loglevel, logfile, pidfile, log_queue):
-    logger = logging.getLogger()
-    logger.setLevel(loglevel)
-    if len(logger.handlers) < 1:
+def logger_run(loglevel, log_queue, logfile, pidfile):
+    log = logging.getLogger()
+    log.setLevel(loglevel)
+    if len(log.handlers) < 1:
         formatter = logging.Formatter(LOG_FORMAT)
         if logfile:
             outfile = logging.FileHandler(logfile)
             outfile.setFormatter(formatter)
-            logger.addHandler(outfile)
+            log.addHandler(outfile)
         if not pidfile:
             console = ColoredStreamHandler(sys.stderr)
             console.setFormatter(formatter)
-            logger.addHandler(console)
+            log.addHandler(console)
 
+    log.warning("Starting Xapiand Logger (pid:%s)", os.getpid())
+
+    quit = False
     while True:
         try:
             record = log_queue.get()
             if record is None:  # We send this as a sentinel to tell the listener to quit.
                 break
-            logger.handle(record)  # No level or filter logic applied - just do it!
+            log.handle(record)  # No level or filter logic applied - just do it!
         except (KeyboardInterrupt, SystemExit):
+            if quit:
+                raise
+            quit = True
             continue
         except:
             import traceback
             traceback.print_exc(file=sys.stderr)
 
+    log.warning("Xapiand Logger ended! (pid:%s)", os.getpid())
 
-def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=0,
-               working_directory=None, verbosity=2, commit_slots=None, commit_timeout=None,
-               port=None, queue=None, **options):
+
+def forwarder_run(loglevel, log_queue, address, port):
+    log = logging.getLogger()
+    log.addHandler(QueueHandler(log_queue))
+    log.setLevel(loglevel)
+
+    log.warning("Starting Xapiand Forwarder (pid:%s)", os.getpid())
+
+    xapian_forwarder = XapianForwarder((address, port))
+
+    def _server_stop(sig=None):
+        global STOPPED
+
+        now = time.time()
+
+        stopped = STOPPED
+
+        if sig:
+            if stopped:
+                if now - stopped < 0.5:
+                    log.error("Killing forwarder process!...")
+                    sys.exit(-1)
+                    return
+                if now - stopped > 1:
+                    log.error("Forcing forwarder shutdown...")
+                    xapian_forwarder.close()
+            else:
+                log.info("Warm forwarder shutdown... (%d open connections)", len(xapian_forwarder.sockets))
+                xapian_forwarder.close()
+
+    # gevent.signal(signal.SIGQUIT, _server_stop, signal.SIGQUIT)
+    gevent.signal(signal.SIGTERM, _server_stop, signal.SIGTERM)
+    gevent.signal(signal.SIGINT, _server_stop, signal.SIGINT)
+
+    log.debug("Starting forwarder...")
+    xapian_forwarder.start()
+
+    gevent.wait()
+
+    _server_stop()
+
+    log.debug("Waiting for forwarder to stop...")
+    gevent.wait()  # Wait for worker
+
+    log.warning("Xapiand Forwarder ended! (pid:%s)", os.getpid())
+
+
+def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout, data):
     global PQueue, STOPPED
-
-    loglevel = ['ERROR', 'WARNING', 'INFO', 'DEBUG'][3 if verbosity == 'v' else int(verbosity)]
-
-    log_queue = multiprocessing.Queue()
-    logging_job = multiprocessing.Process(target=logging_run, args=(loglevel, logfile, pidfile, log_queue))
-    logging_job.start()
 
     log = logging.getLogger()
     log.addHandler(QueueHandler(log_queue))
     log.setLevel(loglevel)
 
-    if pidfile:
-        create_pidlock(pidfile)
+    commit_slots = commit_slots or multiprocessing.cpu_count()
 
     if commit_timeout is None:
         commit_timeout = COMMIT_TIMEOUT
     timeout = min(max(int(round(commit_timeout * 0.3)), 1), 3)
 
-    commit_slots = commit_slots or multiprocessing.cpu_count()
-
     PQueue = AVAILABLE_QUEUES.get(queue) or AVAILABLE_QUEUES[None]
     mode = "with multiple threads and %s commit slots using %s" % (commit_slots, PQueue.__name__)
-    log.warning("Starting Xapiand %s %s [%s] (pid:%s)", version, mode, loglevel, os.getpid())
-
-    if ':' in port:
-        listen = port
-    else:
-        listen = ':%s' % port
+    log.warning("Starting Xapiand Server %s %s [%s] (pid:%s)", version, mode, loglevel, os.getpid())
 
     commit_lock = threading.Semaphore(commit_slots)
     timeouts = Obj(
@@ -669,7 +716,7 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
     databases_pool = DatabasesPool()
     databases = {}
 
-    server = XapianServer(listen, databases_pool=databases_pool, data=data, log=log)
+    xapian_server = XapianServer((address, port), databases_pool=databases_pool, data=data, log=log)
 
     def _server_stop(sig=None):
         global STOPPED
@@ -688,22 +735,22 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
         if sig:
             if stopped:
                 if now - stopped < 0.5:
-                    log.error("Killing process!...")
+                    log.error("Killing server process!...")
                     sys.exit(-1)
                     return
                 if now - stopped > 1:
-                    log.error("Forcing shutdown...")
-                    server.close()
+                    log.error("Forcing server shutdown...")
+                    xapian_server.close()
             else:
-                log.info("Warm shutdown... (%d open connections)", len(server.clients))
-                server.close()
+                log.info("Warm server shutdown... (%d open connections)", len(xapian_server.clients))
+                xapian_server.close()
 
-    gevent.signal(signal.SIGQUIT, _server_stop, signal.SIGQUIT)
+    # gevent.signal(signal.SIGQUIT, _server_stop, signal.SIGQUIT)
     gevent.signal(signal.SIGTERM, _server_stop, signal.SIGTERM)
     gevent.signal(signal.SIGINT, _server_stop, signal.SIGINT)
 
     log.debug("Starting server...")
-    server.start()
+    xapian_server.start()
 
     pq = get_queue(name=QUEUE_WORKER_MAIN, log=log)
 
@@ -785,7 +832,71 @@ def server_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=
     for t, tq in databases.values():
         t.join()
 
-    log.warning("Xapiand ended! (pid:%s)", os.getpid())
+    log.warning("Xapiand Server ended! (pid:%s)", os.getpid())
 
-    log_queue.put_nowait(None)
-    logging_job.join()
+
+def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=0,
+        working_directory=None, verbosity=2, commit_slots=None, commit_timeout=None,
+        port=None, queue=None, **options):
+    logger_job = forwarder_job = server_job = None
+
+    if pidfile:
+        create_pidlock(pidfile)
+
+    address, _, port = port.partition(':')
+    if not port:
+        port, address = address, ''
+    port = int(port)
+
+    loglevel = ['ERROR', 'WARNING', 'INFO', 'DEBUG'][3 if verbosity == 'v' else int(verbosity)]
+    log_queue = multiprocessing.Queue()
+
+    logger_job = multiprocessing.Process(
+        name="Xapiand-Logger",
+        target=logger_run,
+        args=(loglevel, log_queue, logfile, pidfile),
+    )
+    logger_job.start()
+
+    # forwarder_job = multiprocessing.Process(
+    #     name="Xapiand-Forwarder",
+    #     target=forwarder_run,
+    #     args=(loglevel, log_queue, address, port + 1),
+    # )
+    # forwarder_job.start()
+
+    server_job = multiprocessing.Process(
+        name="Xapiand-Server",
+        target=server_run,
+        args=(loglevel, log_queue, address, port, commit_slots, commit_timeout, data),
+    )
+    server_job.start()
+
+    quit = False
+    while True:
+        try:
+            if forwarder_job:
+                forwarder_job.join()
+
+            if server_job:
+                server_job.join()
+
+            log_queue.put_nowait(None)
+            logger_job.join()
+
+            break
+        except (KeyboardInterrupt, SystemExit):
+            if quit:
+                if forwarder_job:
+                    forwarder_job.terminate()
+
+                if server_job:
+                    server_job.terminate()
+
+                logger_job.terminate()
+                raise
+            quit = True
+            continue
+        except:
+            import traceback
+            traceback.print_exc(file=sys.stderr)

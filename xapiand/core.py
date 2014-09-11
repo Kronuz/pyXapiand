@@ -77,7 +77,7 @@ def _xapian_subdatabase(subdatabases, db, writable, create, data='.', log=loggin
             database = _xapian_database_open(path, writable, create, data, log)
         elif scheme == 'xapian':
             timeout = int(query_dict.get('timeout', 0))
-            database = _xapian_database_connect(hostname, port or 33333, timeout, writable, data, log)
+            database = _xapian_database_connect(hostname, port or 8891, timeout, writable, data, log)
         else:
             raise InvalidIndexError("Invalid database scheme")
         database._db = db
