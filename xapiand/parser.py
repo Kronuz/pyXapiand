@@ -14,8 +14,9 @@ FACETS_RE = re.compile(r'\bFACETS\s+(\d+)?([_a-zA-Z0-9, ]+)\b', re.IGNORECASE)
 PARTIAL_RE = re.compile(r'\bPARTIAL\s+(.*)', re.IGNORECASE)
 SEARCH_RE = re.compile(r'\bSEARCH\s+(.*)', re.IGNORECASE)
 TERMS_RE = re.compile(r'\bTERMS\s+(.*)', re.IGNORECASE)
+DISTINCT_RE = re.compile(r'\bDISTINCT\s+(.*)', re.IGNORECASE)
 
-CMDS_RE = re.compile(r'\b(OFFSET|LIMIT|ORDER\s+BY|FACETS|PARTIAL|SEARCH|TERMS)\s', re.IGNORECASE)
+CMDS_RE = re.compile(r'\b(OFFSET|LIMIT|ORDER\s+BY|FACETS|PARTIAL|SEARCH|TERMS|DISTINCT)\s', re.IGNORECASE)
 
 
 def index_parser(document):
@@ -180,6 +181,7 @@ def search_parser(query_string):
     search = []
     facets = None
     terms = []
+    distinct = False
 
     query_string = " SEARCH %s " % (query_string or '')
     query_re = r''.join('(%s.*)' % s for s in CMDS_RE.findall(query_string))
@@ -244,6 +246,17 @@ def search_parser(query_string):
             # print "terms:", terms
             continue
 
+        match = DISTINCT_RE.search(string)
+        if match:
+            string = DISTINCT_RE.sub('', string)
+            v = match.group(1).strip()
+            if v:
+                distinct = v
+            else:
+                distinct = True
+            # print "distinct:", distinct
+            continue
+
         # Get searchs:
         match = SEARCH_RE.search(string)
         if match:
@@ -262,6 +275,7 @@ def search_parser(query_string):
         'first': first,
         'maxitems': maxitems,
         'sort_by': sort_by,
+        'distinct': distinct,
 
         'sort_by_reversed': sort_by_reversed,
         'check_at_least': check_at_least,

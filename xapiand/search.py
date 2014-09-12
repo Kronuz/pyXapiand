@@ -167,6 +167,7 @@ class Search(object):
         self.maxitems = obj.get('maxitems', MAX_DOCS)
         self.first = obj.get('first', 0)
         self.sort_by = obj.get('sort_by')
+        self.distinct = obj.get('distinct')
         self.sort_by_reversed = obj.get('sort_by_reversed')
 
     def get_enquire(self, database):
@@ -214,6 +215,12 @@ class Search(object):
                     warnings.append("Ignored document value name (%r)" % name)
             enquire.set_sort_by_key_then_relevance(sorter, self.sort_by_reversed)
 
+        if self.distinct:
+            if self.distinct is True:
+                field = 'id'
+            else:
+                field = self.distinct
+            enquire.set_collapse_key(get_slot(field))
         self.spies = spies
         self.warnings = warnings
 
