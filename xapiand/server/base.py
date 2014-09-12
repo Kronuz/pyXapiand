@@ -182,7 +182,7 @@ class ClientReceiver(object):
 
 class CommandServer(StreamServer):
     receiver_class = ClientReceiver
-    pool_size = 10
+    pool_size = 100
 
     def __init__(self, *args, **kwargs):
         log = kwargs.pop('log', logging)
