@@ -2,6 +2,11 @@ from __future__ import absolute_import, unicode_literals
 
 import logging
 
+try:
+    import cPickle as pickle
+except ImportError:
+    import pickle
+
 
 class QueueHandler(logging.Handler):
     """
@@ -26,6 +31,14 @@ class QueueHandler(logging.Handler):
             if ei:
                 self.format(record)  # just to get traceback text into record.exc_text
                 record.exc_info = None  # not needed any more
+            args = []
+            for arg in record.args:
+                try:
+                    pickle.dumps(arg)
+                except Exception:
+                    arg = "%s" % arg
+                args.append(arg)
+            record.args = tuple(args)
             self.queue.put_nowait(record)
         except Exception:
             self.handleError(record)
