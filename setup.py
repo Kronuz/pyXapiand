@@ -28,7 +28,7 @@ setup(
         'xapiand.management.commands',
     ],
     url='http://github.com/Kronuz/Xapiand',
-    license='LICENSE.txt',
+    license='MIT / GPL2',
     keywords='indexing server xapian',
     description="Xapian indexing and querying server implemented in Python",
     long_description=read('README.rst'),
