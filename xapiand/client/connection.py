@@ -404,7 +404,7 @@ class ServerPool(object):
             try:
                 connection.connect()
                 return connection
-            except (socket.timeout, socket.error) as exc:
+            except (socket.timeout, socket.error, ConnectionError) as exc:
                 if not isinstance(exc, socket.timeout):
                     if exc.errno != ECONNREFUSED:
                         # unmanaged case yet
