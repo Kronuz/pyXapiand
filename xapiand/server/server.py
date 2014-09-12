@@ -736,7 +736,10 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
                     log.error("Cannot send command to queue! (2)")
 
     log.debug("Waiting for connected clients to disconnect...")
-    gevent.wait()
+    while True:
+        if gevent.wait(timeout=5):
+            break
+        xapian_server.close(10)
 
     PQueue.STOPPED = STOPPED = time.time()
 

@@ -116,6 +116,7 @@ class ClientReceiver(object):
         self.encoding = encoding
         self.encoding_errors = encoding_errors
         self.cmd_id = 0
+        self.activity = time.time()
 
     def close(self):
         self.closed = True
@@ -176,7 +177,7 @@ class ClientReceiver(object):
         self.socket_file.flush()
 
     def lineReceived(self, line):
-        pass
+        self.activity = time.time()
 
 
 class CommandServer(StreamServer):
@@ -189,7 +190,6 @@ class CommandServer(StreamServer):
         self.log = log
         self.pool = ThreadPool(self.pool_size)
         self.clients = set()
-        self.weak = set()
 
     def buildClient(self, client_socket, address):
         return self.receiver_class(self, client_socket, address, log=self.log)
@@ -197,28 +197,43 @@ class CommandServer(StreamServer):
     def handle(self, client_socket, address):
         client = self.buildClient(client_socket, address)
 
-        self.clients.add(client_socket)
+        self.clients.add(client)
         client.connectionMade()
         try:
             client.handle()
         finally:
-            self.clients.discard(client_socket)
+            self.clients.discard(client)
             client.connectionLost()
 
-    def close(self):
+    def close(self, timeout=None):
         if self.closed:
-            self.log.error("Forcing server shutdown (%s clients)...", len(self.clients))
-            for sock in self.clients:
-                sock._sock.close()
+            if timeout is None:
+                self.log.error("Forcing server shutdown (%s clients)...", len(self.clients))
         else:
+            if timeout is None:
+                timeout = 10
             self.log.warning("Hitting Ctrl+C again will terminate all running tasks!")
             super(CommandServer, self).close()
-            for sock in self.weak:
-                sock._sock.close()
+
+        now = time.time()
+        clean = []
+        for client in self.clients:
+            if timeout is None or client._weak or now - client.activity > timeout:
+                try:
+                    client.client_socket._sock.close()
+                except AttributeError:
+                    pass
+                clean.append(client)
+        for client in clean:
+            self.clients.discard(client)
 
 
 class CommandReceiver(ClientReceiver):
     welcome = "# Welcome to the server! Type quit to exit."
+
+    def __init__(self, *args, **kwargs):
+        self._weak = False
+        super(CommandReceiver, self).__init__(*args, **kwargs)
 
     def connectionMade(self):
         self.log.info("New connection from %s:%d (%d open connections)" % (self.address[0], self.address[1], len(self.server.clients)))
@@ -229,6 +244,7 @@ class CommandReceiver(ClientReceiver):
         self.log.info("Lost connection from %s:%d (%d open connections)" % (self.address[0], self.address[1], len(self.server.clients)))
 
     def lineReceived(self, line):
+        super(CommandReceiver, self).lineReceived(line)
         line = line.decode(self.encoding, self.encoding_errors)
         cmd, _, line = line.partition(' ')
         cmd = cmd.strip().lower()
@@ -263,7 +279,7 @@ class CommandReceiver(ClientReceiver):
         Makes the connection weak (closes when the server needs to)
 
         """
-        self.server.weak.add(self.client_socket)
+        self._weak = True
         self.sendLine(">> OK")
 
     def _help(self, func, cmd):
