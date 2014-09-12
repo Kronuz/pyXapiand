@@ -121,8 +121,8 @@ class XapiandReceiver(CommandReceiver):
         try:
             self._reopen()
             self.sendLine(">> OK")
-        except InvalidIndexError as e:
-            self.sendLine(">> ERR: Reopen: %s" % e)
+        except InvalidIndexError as exc:
+            self.sendLine(">> ERR: REOPEN: %s" % exc)
 
     @command
     def create(self, line=''):
@@ -138,8 +138,8 @@ class XapiandReceiver(CommandReceiver):
             try:
                 self._reopen(create=True, endpoints=endpoints)
                 self.active_endpoints = endpoints
-            except InvalidIndexError as e:
-                self.sendLine(">> ERR: Create: %s" % e)
+            except InvalidIndexError as exc:
+                self.sendLine(">> ERR: CREATE: %s" % exc)
             self.sendLine(">> OK")
         else:
             self.sendLine(">> ERR: [405] You must specify a valid endpoint for the database")
@@ -163,8 +163,8 @@ class XapiandReceiver(CommandReceiver):
             try:
                 self._reopen(create=False, endpoints=endpoints)
                 self.active_endpoints = endpoints
-            except InvalidIndexError as e:
-                self.sendLine(">> ERR: Using: %s" % e)
+            except InvalidIndexError as exc:
+                self.sendLine(">> ERR: OPEN: %s" % exc)
                 return
         if self.active_endpoints:
             self.sendLine(">> OK")
@@ -189,8 +189,8 @@ class XapiandReceiver(CommandReceiver):
             try:
                 self._reopen(create=True, endpoints=endpoints)
                 self.active_endpoints = endpoints
-            except InvalidIndexError as e:
-                self.sendLine(">> ERR: Using: %s" % e)
+            except InvalidIndexError as exc:
+                self.sendLine(">> ERR: USING: %s" % exc)
                 return
         if self.active_endpoints:
             self.sendLine(">> OK")
@@ -220,8 +220,8 @@ class XapiandReceiver(CommandReceiver):
                     try:
                         for result in search.results:
                             self.sendLine(json.dumps(result, ensure_ascii=False))
-                    except XapianError as e:
-                        self.sendLine(">> ERR: Unable to get results: %s" % e)
+                    except XapianError as exc:
+                        self.sendLine(">> ERR: Unable to get results: %s" % exc)
                         return
 
                     query_string = str(search.query)
@@ -232,8 +232,8 @@ class XapiandReceiver(CommandReceiver):
 
                 self.sendLine(">> OK: %s documents found in %s" % (size, format_time(time.time() - start)))
                 return size
-        except InvalidIndexError as e:
-            self.sendLine(">> ERR: %s" % e)
+        except InvalidIndexError as exc:
+            self.sendLine(">> ERR: %s" % exc)
             return
 
     @command(threaded=True, db=True, reopen=True)
@@ -297,8 +297,8 @@ class XapiandReceiver(CommandReceiver):
                 size = database.get_doccount()
                 self.sendLine(">> OK: %s documents found in %s" % (size, format_time(time.time() - start)))
                 return size
-        except InvalidIndexError as e:
-            self.sendLine(">> ERR: Count: %s" % e)
+        except InvalidIndexError as exc:
+            self.sendLine(">> ERR: COUNT: %s" % exc)
     count.__doc__ = """
     Counts matching documents.
 
@@ -490,8 +490,8 @@ def _database_command(database, cmd, db, args, data='.', log=logging):
             xapian_commit(database, db, *args, data=data, log=log)
         else:
             unknown = True
-    except Exception as e:
-        log.exception("%s", e)
+    except Exception as exc:
+        log.exception("%s", exc)
         raise
     duration = time.time() - start
     docid = ' -> %s' % docid if docid else ''
@@ -690,7 +690,11 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
     gevent.signal(signal.SIGINT, xapian_server.close)
 
     log.debug("Starting server...")
-    xapian_server.start()
+    try:
+        xapian_server.start()
+    except Exception as exc:
+        log.error("Cannot start server: %s", exc)
+        sys.exit(-1)
 
     pq = get_queue(name=QUEUE_WORKER_MAIN, log=log)
 
@@ -809,13 +813,14 @@ def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask
     logger_job.daemon = True
     logger_job.start()
 
-    server_job = multiprocessing.Process(
-        name="ServerProcess",
-        target=server_run,
-        args=(loglevel, log_queue, address, port, commit_slots, commit_timeout, data),
-    )
-    server_job.daemon = True
-    server_job.start()
+    # server_job = multiprocessing.Process(
+    #     name="ServerProcess",
+    #     target=server_run,
+    #     args=(loglevel, log_queue, address, port, commit_slots, commit_timeout, data),
+    # )
+    # server_job.daemon = True
+    # server_job.start()
+    server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout, data)
 
     quit = 0
     while True:

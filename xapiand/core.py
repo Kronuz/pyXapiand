@@ -75,23 +75,36 @@ def get_slot(name):
         return int(md5(_name).hexdigest(), 16) & 0xffffffff
 
 
-def _spawn_tcpservers(endpoints):
+def _spawn_tcpservers(endpoints, data='.', log=logging):
     from . import Xapian
 
-    servers = {}
-    p = pool.Pool(10)
+    max_pool_size = 10
+
+    all_servers = {}
+    p = pool.Pool(max_pool_size)
+
+    def spawner(db, parse, data, log):
+        scheme, hostname, port, username, password, path, query, query_dict = parse
+        servers = '%s:%s' % (hostname, port or 8890)
+        xapiand = all_servers.setdefault(servers, Xapian(
+            servers,
+            max_pool_size=max_pool_size,
+            max_retries=0,
+            max_connect_retries=1,
+            socket_timeout=1,
+            weak=True,
+        ))
+        time_, address = xapiand.spawn(db)
+        server = TcpDatabase(db, None, address)
+        server.time = time_
+        return server
 
     def _port(db):
-        def spawner(db, parse, data, log):
-            scheme, hostname, port, username, password, path, query, query_dict = parse
-            host = '%s:%s' % (hostname, port or 8890)
-            xapiand = servers.setdefault(host, Xapian(host, weak=True))
-            time_, address = xapiand.spawn(db)
-            server = TcpDatabase(db, None, address)
-            server.time = time_
-            return server
         if db.startswith('xapian://'):
-            xapian_spawn(db, spawner)
+            try:
+                xapian_spawn(db, spawner)
+            except InvalidIndexError as exc:
+                log.error("%s", exc)
 
     jobs = [p.spawn(_port, db) for db in endpoints]
     gevent.joinall(jobs)
@@ -116,7 +129,7 @@ def _xapian_subdatabase(subdatabases, db, writable, create, data='.', log=loggin
                         raise KeyError
                     hostname, port = server.address
                 except KeyError:
-                    InvalidIndexError("Could not connect to TCP server")
+                    raise InvalidIndexError("Cannot connect to TCP server")
             timeout = int(query_dict.get('timeout', 0))
             database = _xapian_database_connect(hostname, port or 8891, timeout, writable, data, log)
         else:
@@ -147,12 +160,12 @@ def _xapian_database_open(path, writable, create, data='.', log=logging):
                     database = xapian.WritableDatabase(path, xapian.DB_CREATE_OR_OPEN)
                     database.close()
                 database = xapian.Database(path)
-    except xapian.DatabaseLockError as e:
-        raise InvalidIndexError('Unable to lock index at %s: %s' % (path, e))
-    except xapian.DatabaseOpeningError as e:
-        raise InvalidIndexError('Unable to open index at %s: %s' % (path, e))
-    except xapian.DatabaseError as e:
-        raise InvalidIndexError('Unable to use index at %s: %s' % (path, e))
+    except xapian.DatabaseLockError as exc:
+        raise InvalidIndexError('Unable to lock index at %s: %s' % (path, exc))
+    except xapian.DatabaseOpeningError as exc:
+        raise InvalidIndexError('Unable to open index at %s: %s' % (path, exc))
+    except xapian.DatabaseError as exc:
+        raise InvalidIndexError('Unable to use index at %s: %s' % (path, exc))
     return database
 
 
@@ -179,7 +192,7 @@ def _xapian_database(endpoints, writable, create, data='.', log=logging):
                 server.time = now
             except KeyError:
                 missing.append(db)
-    _spawn_tcpservers(missing)
+    _spawn_tcpservers(missing, data=data, log=log)
 
     if writable:
         database = xapian.WritableDatabase()
@@ -217,8 +230,8 @@ def _xapian_spawn(address, path, data='.', log=logging):
         process = subprocess.Popen(args, stdout=FNULL, stderr=subprocess.STDOUT)
         log.info("Spawned xapian TCP server for \"%s\": %s:%s (pid:%s)", path, address[0], address[1], process.pid)
         return process
-    except Exception as e:
-        log.error("Can't exec %r: %s", ' '.join(args), e)
+    except Exception as exc:
+        log.error("Can't exec %r: %s", ' '.join(args), exc)
         raise IOError("Cannot spawn xapian TCP server process")
     finally:
         time.sleep(0.1)
@@ -245,13 +258,13 @@ def xapian_spawn(db, spawner=_xapian_spawner, data='.', log=logging):
         try:
             server = spawner(db, parse, data=data, log=log)
             tcpservers.setdefault(db, server)
-        except IOError:
+        except Exception as exc:
             try:
                 server = tcpservers[db]
                 if not server.active:
                     raise KeyError
             except KeyError:
-                raise InvalidIndexError("Cannot spawn xapian TCP server process")
+                raise InvalidIndexError("Cannot spawn TCP server: %s" % exc)
     if server.process:
         server.time = time.time()
     return server.time, server.address
@@ -441,8 +454,8 @@ def xapian_close(database, data='.', log=logging):
 def xapian_reopen(database, data='.', log=logging):
     try:
         database.reopen()
-    except (xapian.DatabaseOpeningError, xapian.NetworkError) as e:
-        log.error("xapian_reopen database: %s", e)
+    except (xapian.DatabaseOpeningError, xapian.NetworkError) as exc:
+        log.error("xapian_reopen database: %s", exc)
 
         # Could not be opened, try full reopen:
         xapian_close(database)
@@ -541,8 +554,8 @@ def xapian_index(database, db, document, commit=False, data='.', log=logging):
 
     try:
         docid = subdatabase.replace_document(document_id, document)
-    except xapian.InvalidArgumentError as e:
-        log.error(e, exc_info=True)
+    except xapian.InvalidArgumentError as exc:
+        log.error("%s", exc)
 
     if commit:
         subdatabase.commit()
