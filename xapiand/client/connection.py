@@ -309,6 +309,7 @@ class ServerPool(object):
     """
     Creates a server pool.
 
+    :param: servers: server or list of servers.
     :param: max_pool_size: size of the pool.
     :param: blacklist_time: when a connection to a server fails, put the
             server in a blacklist for this long.
@@ -328,7 +329,7 @@ class ServerPool(object):
     """
     connection_class = Connection
 
-    def __init__(self, server, max_pool_size=35, blacklist_time=60,
+    def __init__(self, servers, max_pool_size=35, blacklist_time=60,
                  wait_for_connection=None, max_age=60, max_retries=3,
                  max_connect_retries=2, reconnect_delay=0.1,
                  socket_timeout=4,
@@ -348,10 +349,10 @@ class ServerPool(object):
             wait_for_connection=wait_for_connection,
             max_age=max_age,
         )
-        if isinstance(server, basestring):
-            self._servers = server.split(';')
+        if isinstance(servers, basestring):
+            self._servers = set(s.strip() for s in servers.split(';') if s.strip())
         else:
-            self._servers = server
+            self._servers = set(servers)
 
     def __getattr__(self, attr):
         func = getattr(self.connection_class, attr)
@@ -386,7 +387,7 @@ class ServerPool(object):
                 del self._blacklist[server]
 
         # build the list of available servers
-        choices = list(set(self._servers) ^ set(self._blacklist.keys()))
+        choices = list(self._servers ^ set(self._blacklist))
 
         if not choices:
             return None
