@@ -156,7 +156,15 @@ class ClientReceiver(object):
 
     def dispatch(self, func, line, command):
         if func.threaded:
-            self.server.pool.spawn(func, command, self.client_socket._sock, line, command)
+            commands_pool = self.server.pool
+            pool_size = self.server.pool_size
+            pool_size_warning = self.server.pool_size_warning
+            commands_pool.spawn(func, command, self.client_socket._sock, line, command)
+            pool_used = len(commands_pool)
+            if not (pool_size_warning - pool_used) % 10:
+                self.log.warning("Commands pool is close to be full (%s/%s)", pool_used, pool_size)
+            elif pool_used == pool_size:
+                self.log.error("Commands poll is full! (%s/%s)", pool_used, pool_size)
         else:
             try:
                 command.executed(func(line))
@@ -184,12 +192,13 @@ class ClientReceiver(object):
 
 class CommandServer(StreamServer):
     receiver_class = ClientReceiver
-    pool_size = 100
+    pool_size = 10
 
     def __init__(self, *args, **kwargs):
         log = kwargs.pop('log', logging)
         super(CommandServer, self).__init__(*args, **kwargs)
         self.log = log
+        self.pool_size_warning = int(self.pool_size / 3.0 * 2.0)
         self.pool = ThreadPool(self.pool_size)
         self.clients = set()
 

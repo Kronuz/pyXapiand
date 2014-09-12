@@ -23,6 +23,8 @@ from .platforms import pid_exists
 DATABASE_MAX_LIFE = 900  # stop writer adter 15 minutes of inactivity
 DATABASE_SHORT_LIFE = max(DATABASE_MAX_LIFE - 60, DATABASE_MAX_LIFE - DATABASE_MAX_LIFE / 3, 0)
 
+MIN_TCP_SERVER_PORTS = 100
+
 DOCUMENT_ID_TERM_PREFIX = 'Q'
 DOCUMENT_CUSTOM_TERM_PREFIX = 'X'
 
@@ -348,7 +350,7 @@ class TcpPool(CleanablePool):
     def acquire(self):
         with self.lock:
             try:
-                if len(self.used) < 100:
+                if len(self.used) < MIN_TCP_SERVER_PORTS:
                     raise IndexError
                 port = self.unused.pop()
             except IndexError:

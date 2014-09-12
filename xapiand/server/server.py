@@ -50,6 +50,8 @@ LOG_FORMAT = "[%(asctime)s: %(levelname)s/%(processName)s:%(threadName)s] %(mess
 STOPPED = 0
 COMMIT_SLOTS = 10
 COMMIT_TIMEOUT = 1
+WRITERS_POOL_SIZE = 10
+COMMANDS_POOL_SIZE = 20
 
 WRITERS_FILE = 'Xapian-Writers.db'
 QUEUE_WORKER_MAIN = 'Xapian-Worker'
@@ -433,6 +435,7 @@ class XapiandReceiver(CommandReceiver):
 
 
 class XapiandServer(CommandServer):
+    pool_size = COMMANDS_POOL_SIZE
     receiver_class = XapiandReceiver
 
     def __init__(self, *args, **kwargs):
@@ -691,7 +694,8 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
 
     pq = get_queue(name=QUEUE_WORKER_MAIN, log=log)
 
-    pool_size = 100
+    pool_size = WRITERS_POOL_SIZE
+    pool_size_warning = int(pool_size / 3.0 * 2.0)
     writers_pool = ThreadPool(pool_size)
 
     def start_writer(db):
@@ -704,6 +708,11 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
                 raise KeyError
         except KeyError:
             tq = tq or get_queue(name=os.path.join(data, name), log=log)
+            pool_used = len(writers_pool)
+            if not (pool_size_warning - pool_used) % 10:
+                log.warning("Writers pool is close to be full (%s/%s)", pool_used, pool_size)
+            elif pool_used == pool_size:
+                log.error("Writers poll is full! (%s/%s)", pool_used, pool_size)
             t = writers_pool.spawn(_writer_loop, databases, databases_pool, db, tq, commit_lock, timeouts, data, log)
             databases[db] = (t, tq)
         return db, name, t, tq
