@@ -410,7 +410,7 @@ def xapian_database(databases_pool, endpoints, writable, create=False, reopen=Fa
     finally:
         with pool_queue.lock:
             if database:
-                pool_queue.used.remove(database)
+                pool_queue.used.discard(database)
                 if len(pool_queue.unused) < 10:
                     if not database._closed:
                         pool_queue.unused.append(database)
