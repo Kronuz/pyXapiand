@@ -671,7 +671,7 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
 
     PQueue = AVAILABLE_QUEUES.get(queue) or AVAILABLE_QUEUES['default']
     mode = "with multiple threads and %s commit slots using %s" % (commit_slots, PQueue.__name__)
-    log.warning("Starting Xapiand Server %s %s [%s] (pid:%s)", version, mode, loglevel, os.getpid())
+    log.warning("Starting Xapiand Server v%s %s [%s] (pid:%s)", version, mode, loglevel, os.getpid())
 
     commit_lock = Semaphore(commit_slots)
     timeouts = Obj(
@@ -813,14 +813,13 @@ def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask
     logger_job.daemon = True
     logger_job.start()
 
-    # server_job = multiprocessing.Process(
-    #     name="ServerProcess",
-    #     target=server_run,
-    #     args=(loglevel, log_queue, address, port, commit_slots, commit_timeout, data),
-    # )
-    # server_job.daemon = True
-    # server_job.start()
-    server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout, data)
+    server_job = multiprocessing.Process(
+        name="ServerProcess",
+        target=server_run,
+        args=(loglevel, log_queue, address, port, commit_slots, commit_timeout, data),
+    )
+    server_job.daemon = True
+    server_job.start()
 
     quit = 0
     while True:
