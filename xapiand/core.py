@@ -475,6 +475,7 @@ def xapian_index(database, db, document, commit=False, data='.', log=logging):
             log.warning("Ignored document value name (%r)", name)
 
     if isinstance(document_id, basestring):
+        document.add_value(get_slot('id'), document_id)
         document_id = DOCUMENT_ID_TERM_PREFIX + document_id
         document.add_boolean_term(document_id)  # Make sure document_id is also a term (otherwise it doesn't replace an existing document)
 

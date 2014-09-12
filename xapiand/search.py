@@ -267,9 +267,15 @@ class Search(object):
         produced = 0
         for match in matches:
             self.dead or 'alive'  # Raises DeadException when needed
+            try:
+                id = match.document.get_value(get_slot('id'))
+            except (xapian.NetworkError, xapian.DatabaseModifiedError):
+                self.database = xapian_reopen(self.database, data=self.data, log=self.log)
+                id = match.document.get_value(get_slot('id'))
             produced += 1
             result = {
-                'id': match.docid,
+                'id': id,
+                'docid': match.docid,
                 'rank': match.rank,
                 'weight': match.weight,
                 'percent': match.percent,
