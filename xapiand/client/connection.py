@@ -114,7 +114,7 @@ def with_retry(func):
         retries = 0
         delay = self.reconnect_delay
 
-        while retries < self.max_connect_retries:
+        while retries <= self.max_connect_retries:
             try:
                 return func(self, *args, **kw)
             except NewConnection:
@@ -178,10 +178,7 @@ class Connection(object):
             except socket.error:
                 exc_info = sys.exc_info()
                 e = exc_info[1]
-                raise (
-                    ConnectionError,
-                    ConnectionError(self._error_message(e)),
-                    exc_info[2])
+                raise ConnectionError(self._error_message(e)), None, exc_info[2]
             self.client_socket = sock
         if not self.socket_file:
             self.socket_file = self.client_socket.makefile()
@@ -196,7 +193,7 @@ class Connection(object):
         retries = 0
         delay = self.reconnect_delay
 
-        while retries < self.max_connect_retries:
+        while retries <= self.max_connect_retries:
             try:
                 sock.connect((self.host, self.port))
                 return sock
@@ -245,10 +242,7 @@ class Connection(object):
                 _errno, errmsg = 'UNKNOWN', e.args[0]
             else:
                 _errno, errmsg = e.args
-            raise (
-                ConnectionError,
-                ConnectionError("Error %s while writing to socket. %s." % (_errno, errmsg)),
-                exc_info[2])
+            raise ConnectionError("Error %s while writing to socket. %s." % (_errno, errmsg)), None, exc_info[2]
         except Exception:
             self.disconnect()
             raise
@@ -283,10 +277,7 @@ class Connection(object):
                 self.disconnect()
                 exc_info = sys.exc_info()
                 e = exc_info[1]
-                raise (
-                    ConnectionError,
-                    ConnectionError("Error while reading from socket: %s" % (e.args,)),
-                    exc_info[2])
+                raise ConnectionError("Error while reading from socket: %s" % (e.args,)), None, exc_info[2]
 
     def pack_command(self, *args):
         return "%s%s" % (" ".join(a for a in args if a), self.delimiter)
@@ -313,7 +304,7 @@ class ServerPool(object):
     :param: max_pool_size: size of the pool.
     :param: blacklist_time: when a connection to a server fails, put the
             server in a blacklist for this long.
-    :param: max_retries: number of times a command call will be retried
+    :param: max_retries: number of times a command call will be tried
             (with different connections from the pool).
     :param: wait_for_connection: how long will it wait for an available
             connection from the pool.
@@ -364,13 +355,13 @@ class ServerPool(object):
     def call(self, name, *args, **kwargs):
         retries = 0
 
-        while retries < self.max_retries:
+        while retries <= self.max_retries:
             with self._pool.reserve() as connection:
                 try:
                     func = getattr(connection, name)
                 except AttributeError:
                     exc_info = sys.exc_info()
-                    retries = self.max_retries
+                    retries = self.max_retries + 1
                 else:
                     try:
                         return func(*args, **kwargs)
@@ -381,12 +372,12 @@ class ServerPool(object):
         raise exc_info[0], exc_info[1], exc_info[2]
 
     def _pick_server(self):
-        # update the blacklist
+        # Update the blacklist
         for server, age in self._blacklist.items():
             if time.time() - age > self.blacklist_time:
                 del self._blacklist[server]
 
-        # build the list of available servers
+        # Build the list of available servers
         choices = list(self._servers ^ set(self._blacklist))
 
         if not choices:
@@ -404,7 +395,7 @@ class ServerPool(object):
 
     def _client_factory(self, context):
         server = self._pick_server()
-        last_error = None
+        exc_info = None
 
         while server is not None:
             host, _, port = server.partition(':')
@@ -422,19 +413,16 @@ class ServerPool(object):
                 connection.connect()
                 return connection
             except (socket.timeout, socket.error, ConnectionError) as exc:
-                if not isinstance(exc, socket.timeout):
+                if isinstance(exc, socket.error):
                     if exc.errno != ECONNREFUSED:
-                        # unmanaged case yet
-                        raise
-
-                # well that's embarrassing, let's blacklist this one
-                # and try again
+                        raise  # Unmanaged case yet.
+                # Blacklist this server and try again...
                 self._blacklist_server(server)
                 server = self._pick_server()
-                last_error = exc
+                exc_info = sys.exc_info()
 
-        if last_error is not None:
-            raise last_error
+        if exc_info is not None:
+            raise exc_info[0], exc_info[1], exc_info[2]
         else:
             raise socket.timeout("No server left in the pool")
 
