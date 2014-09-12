@@ -510,11 +510,13 @@ def _database_commit(database, to_commit, commit_lock, timeouts, force=False, da
         do_commit = locked = force and commit_lock.acquire()  # If forcing, wait for the lock
         if not do_commit:
             do_commit = dt0 <= expires_max
+            if do_commit:
+                log.warning("Commit maximum expiration reached, commit forced! (%s)", db)
         if not do_commit:
             if dt1 <= expires_delayed or dt2 <= expires:
                 do_commit = locked = commit_lock.acquire(False)
                 if not locked:
-                    log.debug("Out of commit slots, commit delayed! (%s)", db)
+                    log.warning("Out of commit slots, commit delayed! (%s)", db)
         if do_commit:
             try:
                 _database_command(database, 'COMMIT', db, (), data=data, log=log)
