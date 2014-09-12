@@ -147,7 +147,7 @@ class Connection(object):
     MAX_READ_LENGTH = 1000000
     delimiter = '\r\n'
 
-    def __init__(self, pool, host='localhost', port=1234, endpoints=None,
+    def __init__(self, pool, host='localhost', port=8890, endpoints=None,
                  max_connect_retries=5, reconnect_delay=0.5,
                  socket_timeout=3, encoding='utf-8',
                  encoding_errors='strict'):
@@ -399,7 +399,7 @@ class ServerPool(object):
 
         while server is not None:
             host, _, port = server.partition(':')
-            connection = self.connection_class(self, host=host, port=int(port), socket_timeout=self.socket_timeout)
+            connection = self.connection_class(self, host=host, port=int(port or 8890), socket_timeout=self.socket_timeout)
             connection.context = context
             try:
                 connection.connect()

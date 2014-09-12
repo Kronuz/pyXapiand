@@ -439,8 +439,8 @@ class XapiandServer(CommandServer):
         self.data = kwargs.pop('data', '.')
         self.databases_pool = kwargs.pop('databases_pool')
         super(XapiandServer, self).__init__(*args, **kwargs)
-        address = self.address[0] or '127.0.0.1'
-        port = self.address[1]
+        address = self.address[0] or '0.0.0.0'
+        port = self.address[1] or 8890
         self.log.info("Xapiand Server Listening to %s:%s", address, port)
 
     def buildClient(self, client_socket, address):
@@ -564,8 +564,8 @@ def _writer_loop(databases, databases_pool, db, tq, commit_lock, timeouts, data,
     name = _database_name(db)
     to_commit = {}
 
-    name = threading.current_thread().name
-    threading.current_thread().name = name.replace('Dummy', name[:14])
+    _name = threading.current_thread().name
+    threading.current_thread().name = _name.replace('Dummy', name[:14])
 
     start = last = time.time()
     log.debug("New writer %s: %s", name, db)
@@ -704,7 +704,6 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
             tq = tq or get_queue(name=os.path.join(data, name), log=log)
             t = writers_pool.spawn(_writer_loop, databases, databases_pool, db, tq, commit_lock, timeouts, data, log)
             databases[db] = (t, tq)
-            t.start()
         return db, name, t, tq
 
     if PQueue.persistent:
@@ -756,7 +755,7 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
     if PQueue.persistent:
         with open(writers_file, 'wt') as epfile:
             for db, (t, tq) in databases.items():
-                if t.is_alive():
+                if not t.ready():
                     epfile.write("%s\n" % db)
 
     # Wake up writers:
@@ -768,7 +767,7 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
 
     log.debug("Worker joining %s threads...", len(databases))
     for t, tq in databases.values():
-        t.join()
+        t.wait()
 
     xapian_cleanup(databases_pool, 0, data=data, log=log)
 
@@ -796,6 +795,7 @@ def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask
         target=logger_run,
         args=(loglevel, log_queue, logfile, pidfile),
     )
+    logger_job.daemon = True
     logger_job.start()
 
     server_job = multiprocessing.Process(
@@ -803,6 +803,7 @@ def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask
         target=server_run,
         args=(loglevel, log_queue, address, port, commit_slots, commit_timeout, data),
     )
+    server_job.daemon = True
     server_job.start()
 
     quit = 0

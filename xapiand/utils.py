@@ -41,9 +41,12 @@ def parse_url(url):
             path, hostname = hostname + '/' + path, ''
     else:
         scheme = 'file'
+    port = parts.port or None
+    if scheme == 'xapian' and port == 8890:
+        port = None
     return (scheme,
             hostname or None,
-            parts.port or None,
+            port or None,
             unquote(parts.username or '') or None,
             unquote(parts.password or '') or None,
             normalize_path(path) or None,

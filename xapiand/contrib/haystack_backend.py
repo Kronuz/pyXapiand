@@ -97,7 +97,7 @@ class XapianSearchBackend(BaseSearchBackend):
         if not endpoints:
             raise ImproperlyConfigured("You must specify 'ENDPOINTS' in your settings for connection '%s'." % connection_alias)
         timeout = connection_options.get('TIMEOUT', None)
-        servers = connection_options.get('SERVERS', 'localhost:8890')
+        servers = connection_options.get('SERVERS', '127.0.0.1:8890')
         self.xapian = Xapian(servers, using=endpoints, socket_timeout=timeout)
         self.endpoints = endpoints
 
