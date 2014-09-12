@@ -25,17 +25,20 @@ from ..search import Search
 from .base import CommandReceiver, CommandServer, command
 from .logging import QueueHandler, ColoredStreamHandler
 try:
-    from .redis import RedisQueue
+    from .queue.redis import RedisQueue
 except ImportError:
     RedisQueue = None
-from .fqueue import FileQueue
-from .memory import MemoryQueue
+from .queue.fqueue import FileQueue
+from .queue.memory import MemoryQueue
 
+
+DEFAULT_QUEUE = MemoryQueue
 AVAILABLE_QUEUES = {
     'file': FileQueue,
-    'redis': RedisQueue or MemoryQueue,
+    'redis': RedisQueue or DEFAULT_QUEUE,
     'memory': MemoryQueue,
-    None: MemoryQueue,
+    'persistent': MemoryQueue,
+    'default': DEFAULT_QUEUE,
 }
 
 import logging
@@ -654,7 +657,7 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
         commit_timeout = COMMIT_TIMEOUT
     timeout = min(max(int(round(commit_timeout * 0.3)), 1), 3)
 
-    PQueue = AVAILABLE_QUEUES.get(queue) or AVAILABLE_QUEUES[None]
+    PQueue = AVAILABLE_QUEUES.get(queue) or AVAILABLE_QUEUES['default']
     mode = "with multiple threads and %s commit slots using %s" % (commit_slots, PQueue.__name__)
     log.warning("Starting Xapiand Server %s %s [%s] (pid:%s)", version, mode, loglevel, os.getpid())
 
