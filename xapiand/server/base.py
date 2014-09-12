@@ -83,6 +83,8 @@ def command(threaded=False, **kwargs):
         if threaded:
             @wraps(func)
             def wrapped(self, command, _sock, *args, **kwargs):
+                name = threading.current_thread().name
+                threading.current_thread().name = name.replace('Dummy', 'Command-%s' % command.cmd)
                 client_socket = socket.socket(_sock=_sock)  # Create a gevent socket from the raw socket
                 self.client_socket = client_socket
                 self.socket_file = client_socket.makefile()
