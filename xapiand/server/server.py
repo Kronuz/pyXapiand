@@ -46,6 +46,7 @@ import logging
 LOG_FORMAT = "[%(asctime)s: %(levelname)s/%(processName)s:%(threadName)s] %(message)s"
 
 STOPPED = 0
+COMMIT_SLOTS = 10
 COMMIT_TIMEOUT = 1
 
 WRITERS_FILE = 'Xapian-Writers.db'
@@ -651,7 +652,8 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
     log.addHandler(QueueHandler(log_queue))
     log.setLevel(loglevel)
 
-    commit_slots = commit_slots or multiprocessing.cpu_count()
+    if not commit_slots:
+        commit_slots = COMMIT_SLOTS
 
     if commit_timeout is None:
         commit_timeout = COMMIT_TIMEOUT
