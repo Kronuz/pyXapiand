@@ -569,8 +569,9 @@ def _writer_loop(databases, databases_pool, db, tq, commit_lock, timeouts, data,
     name = _database_name(db)
     to_commit = {}
 
-    tid = threading.current_thread().name.rsplit('-', 1)[-1]
-    threading.current_thread().name = '%s-%s' % (name[:14], tid)
+    current_thread = threading.current_thread()
+    tid = current_thread.name.rsplit('-', 1)[-1]
+    current_thread.name = '%s-%s' % (name[:14], tid)
 
     start = last = time.time()
     log.debug("New writer %s: %s", name, db)

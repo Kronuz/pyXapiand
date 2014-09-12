@@ -10,7 +10,7 @@ except ImportError:
 
 class QueueHandler(logging.Handler):
     """
-    This is a logging handler which sends events to a multiprocessing queue.
+    This is a logging handler which sends events to a queue.
 
     """
     def __init__(self, queue):

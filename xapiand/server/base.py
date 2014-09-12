@@ -83,8 +83,9 @@ def command(threaded=False, **kwargs):
         if threaded:
             @wraps(func)
             def wrapped(self, command, _sock, *args, **kwargs):
-                tid = threading.current_thread().name.rsplit('-', 1)[-1]
-                threading.current_thread().name = 'Command-%s-%s' % (command.cmd, tid)
+                current_thread = threading.current_thread()
+                tid = current_thread.name.rsplit('-', 1)[-1]
+                current_thread.name = 'Command-%s-%s' % (command.cmd, tid)
                 client_socket = socket.socket(_sock=_sock)  # Create a gevent socket from the raw socket
                 self.client_socket = client_socket
                 self.socket_file = client_socket.makefile()
