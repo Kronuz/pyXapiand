@@ -207,6 +207,10 @@ class XapianConnection(Connection):
         time_, address = float(time_), (host, int(port))
         return time_, address
 
+    @command
+    def weak(self):
+        return self._response(self.execute_command('WEAK'))
+
 
 class Xapian(ServerPool):
     connection_class = XapianConnection
@@ -214,7 +218,10 @@ class Xapian(ServerPool):
     def __init__(self, *args, **kwargs):
         using = kwargs.pop('using', None)
         open_ = kwargs.pop('open', None)
+        weak = kwargs.pop('weak', False)
         super(Xapian, self).__init__(*args, **kwargs)
+        if weak:
+            self.weak()
         if using:
             self.using(using)
         elif open_:

@@ -17,7 +17,7 @@ from .serialise import serialise_value, normalize
 from .utils import parse_url, build_url
 from .platforms import pid_exists
 
-DATABASE_MAX_LIFE = 4#00  # stop writer adter 15 minutes of inactivity
+DATABASE_MAX_LIFE = 90#00  # stop writer adter 15 minutes of inactivity
 DATABASE_SHORT_LIFE = max(DATABASE_MAX_LIFE - 60, DATABASE_MAX_LIFE - DATABASE_MAX_LIFE / 3, 0)
 
 DOCUMENT_ID_TERM_PREFIX = 'Q'
@@ -83,7 +83,7 @@ def _spawn_tcpservers(endpoints):
         def spawner(db, parse, data, log):
             scheme, hostname, port, username, password, path, query, query_dict = parse
             host = '%s:%s' % (hostname, port)
-            xapiand = servers.setdefault(host, Xapian(host))
+            xapiand = servers.setdefault(host, Xapian(host, weak=True))
             time_, address = xapiand.spawn(db)
             server = TcpDatabase(db, None, address)
             server.time = time_
@@ -242,7 +242,7 @@ def xapian_spawn(db, spawner=_xapian_spawner, data='.', log=logging):
     except KeyError:
         try:
             server = spawner(db, parse, data=data, log=log)
-            tcpservers[db] = server
+            tcpservers.setdefault(db, server)
         except IOError:
             try:
                 server = tcpservers[db]

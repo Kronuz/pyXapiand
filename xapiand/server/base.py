@@ -189,6 +189,7 @@ class CommandServer(StreamServer):
         self.log = log
         self.pool = ThreadPool(self.pool_size)
         self.clients = set()
+        self.weak = set()
 
     def buildClient(self, client_socket, address):
         return self.receiver_class(self, client_socket, address, log=self.log)
@@ -196,24 +197,24 @@ class CommandServer(StreamServer):
     def handle(self, client_socket, address):
         client = self.buildClient(client_socket, address)
 
-        self.clients.add(client)
+        self.clients.add(client_socket)
         client.connectionMade()
         try:
             client.handle()
         finally:
-            self.clients.remove(client)
+            self.clients.discard(client_socket)
             client.connectionLost()
 
     def close(self):
         if self.closed:
-            self.log.debug("Closing clients...")
-            for client in self.clients:
-                client.client_socket._sock.close()
+            self.log.error("Forcing server shutdown (%s clients)...", len(self.clients))
+            for sock in self.clients:
+                sock._sock.close()
         else:
-            self.log.debug("Closing listener socket. Waiting for clients...")
+            self.log.warning("Hitting Ctrl+C again will terminate all running tasks!")
             super(CommandServer, self).close()
-            for client in self.clients:
-                client.close()
+            for sock in self.weak:
+                sock._sock.close()
 
 
 class CommandReceiver(ClientReceiver):
@@ -255,6 +256,15 @@ class CommandReceiver(ClientReceiver):
         self.sendLine(">> BYE!")
         raise QuitCommand
     exit = quit
+
+    @command(internal=True)
+    def weak(self, line=''):
+        """
+        Makes the connection weak (closes when the server needs to)
+
+        """
+        self.server.weak.add(self.client_socket)
+        self.sendLine(">> OK")
 
     def _help(self, func, cmd):
         # Figure out indentation for docstring:

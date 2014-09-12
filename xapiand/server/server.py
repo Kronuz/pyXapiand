@@ -11,7 +11,8 @@ import threading
 import multiprocessing
 
 import gevent
-from gevent import queue
+from gevent import queue, monkey
+monkey.patch_all(thread=False)
 
 from .. import version, json
 from ..exceptions import InvalidIndexError, XapianError
@@ -621,7 +622,7 @@ def logger_run(loglevel, log_queue, logfile, pidfile):
 
     log.warning("Starting Xapiand Logger (pid:%s)", os.getpid())
 
-    quit = False
+    quit = 0
     while True:
         try:
             record = log_queue.get()
@@ -629,9 +630,9 @@ def logger_run(loglevel, log_queue, logfile, pidfile):
                 break
             log.handle(record)  # No level or filter logic applied - just do it!
         except (KeyboardInterrupt, SystemExit):
-            if quit:
+            if quit >= 3:
                 raise
-            quit = True
+            quit += 1
             continue
         except:
             import traceback
@@ -670,36 +671,8 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
 
     xapian_server = XapiandServer((address, port), databases_pool=databases_pool, data=data, log=log)
 
-    def _server_stop(sig=None):
-        global STOPPED
-
-        now = time.time()
-
-        if sig == signal.SIGINT:
-            log.warning("Hitting Ctrl+C again will terminate all running tasks!")
-        elif sig:
-            log.warning("Sending the signal again will terminate all running tasks! (%s)", sig)
-
-        stopped = STOPPED
-        if not stopped:
-            PQueue.STOPPED = STOPPED = now
-
-        if sig:
-            if stopped:
-                if now - stopped < 0.5:
-                    log.error("Killing server process!...")
-                    sys.exit(-1)
-                    return
-                if now - stopped > 1:
-                    log.error("Forcing server shutdown...")
-                    xapian_server.close()
-            else:
-                log.info("Warm server shutdown... (%d open connections)", len(xapian_server.clients))
-                xapian_server.close()
-
-    # gevent.signal(signal.SIGQUIT, _server_stop, signal.SIGQUIT)
-    gevent.signal(signal.SIGTERM, _server_stop, signal.SIGTERM)
-    gevent.signal(signal.SIGINT, _server_stop, signal.SIGINT)
+    gevent.signal(signal.SIGTERM, xapian_server.close)
+    gevent.signal(signal.SIGINT, xapian_server.close)
 
     log.debug("Starting server...")
     xapian_server.start()
@@ -736,7 +709,7 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
     log.info("Waiting for commands...")
     msg = None
     timeout = timeouts.timeout
-    while not STOPPED:
+    while not xapian_server.closed:
         xapian_cleanup(databases_pool, DATABASE_MAX_LIFE, data=data, log=log)
         try:
             msg = MAIN_QUEUE.get(True, timeout)
@@ -762,10 +735,10 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
                 except Queue.Full:
                     log.error("Cannot send command to queue! (2)")
 
-    _server_stop()
-
     log.debug("Waiting for connected clients to disconnect...")
-    gevent.wait()  # Wait for worker
+    gevent.wait()
+
+    PQueue.STOPPED = STOPPED = time.time()
 
     if PQueue.persistent:
         with open(writers_file, 'wt') as epfile:
@@ -812,15 +785,14 @@ def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask
     )
     logger_job.start()
 
-    # server_job = multiprocessing.Process(
-    #     name="ServerProcess",
-    #     target=server_run,
-    #     args=(loglevel, log_queue, address, port, commit_slots, commit_timeout, data),
-    # )
-    # server_job.start()
-    server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout, data)
+    server_job = multiprocessing.Process(
+        name="ServerProcess",
+        target=server_run,
+        args=(loglevel, log_queue, address, port, commit_slots, commit_timeout, data),
+    )
+    server_job.start()
 
-    quit = False
+    quit = 0
     while True:
         try:
             if server_job:
@@ -831,13 +803,13 @@ def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask
 
             break
         except (KeyboardInterrupt, SystemExit):
-            if quit:
+            if quit >= 3:
                 if server_job:
                     server_job.terminate()
 
                 logger_job.terminate()
                 raise
-            quit = True
+            quit += 1
             continue
         except:
             import traceback

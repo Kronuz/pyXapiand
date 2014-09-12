@@ -3,14 +3,15 @@ from __future__ import absolute_import, unicode_literals
 import sys
 import time
 import Queue
+import socket
 import contextlib
 import threading
-import socket
 
 from errno import EISCONN, EINVAL, ECONNREFUSED
 from functools import wraps
 
 from ..exceptions import ConnectionError, NewConnection
+
 
 # Sentinel used to mark an empty slot in the ConnectionPool queue.
 # Using sys.maxint as the timestamp ensures that empty slots will always
