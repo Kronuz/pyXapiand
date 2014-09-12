@@ -4,6 +4,7 @@ import sys
 import time
 import Queue
 import socket
+import weakref
 import contextlib
 import threading
 
@@ -17,24 +18,6 @@ from ..exceptions import ConnectionError, NewConnection
 # Using sys.maxint as the timestamp ensures that empty slots will always
 # sort *after* live connection objects in the queue.
 EMPTY_SLOT = (sys.maxint, None)
-
-
-def log_command(func):
-    @wraps(func)
-    def wrapped(self, command_name, *args):
-        start = time.time()
-        try:
-            return func(self, command_name, *args)
-        finally:
-            stop = time.time()
-            self.pool.queries.setdefault(self.get_name(), []).append({
-                'command_name': command_name,
-                'additional_args': args,
-                'time': "%.3f s" % (stop - start),
-                'start': start,
-                'stop': stop,
-            })
-    return wrapped
 
 
 def command(func=False, **kwargs):
@@ -52,7 +35,7 @@ class ConnectionPool(object):
     def __init__(self, factory, maxsize=None, max_age=60,
                  wait_for_connection=None):
         self._context_tl = threading.local()
-        self.factory = factory
+        self._factory = weakref.ref(factory)
         self.maxsize = maxsize
         self.max_age = max_age
         self.clients = Queue.PriorityQueue(maxsize)
@@ -61,6 +44,9 @@ class ConnectionPool(object):
         if maxsize is not None:
             for _ in xrange(maxsize):
                 self.clients.put(EMPTY_SLOT)
+
+    def factory(self):
+        return self._factory()(self._context_tl)
 
     @contextlib.contextmanager
     def reserve(self):
@@ -86,14 +72,14 @@ class ConnectionPool(object):
                     # No maxsize and no free connections, create a new one.
                     # XXX TODO: we should be using a monotonic clock here.
                     now = time.time()
-                    connection = self.factory(self._context_tl)
+                    connection = self.factory()
                     return now, connection
             else:
                 now = time.time()
                 # If we got an empty slot placeholder, create a new connection.
                 if connection is None:
                     try:
-                        connection = self.factory(self._context_tl)
+                        connection = self.factory()
                         return now, connection
                     except Exception:
                         if self.maxsize is not None:
@@ -147,11 +133,10 @@ class Connection(object):
     MAX_READ_LENGTH = 1000000
     delimiter = '\r\n'
 
-    def __init__(self, pool, host='localhost', port=8890, endpoints=None,
+    def __init__(self, host='localhost', port=8890, endpoints=None,
                  max_connect_retries=5, reconnect_delay=0.1,
                  socket_timeout=4, encoding='utf-8',
                  encoding_errors='strict'):
-        self.pool = pool
         self.host = host
         self.port = port
         self.endpoints = endpoints
@@ -306,7 +291,6 @@ class Connection(object):
     def pack_command(self, *args):
         return "%s%s" % (" ".join(a for a in args if a), self.delimiter)
 
-    # @log_command
     @with_retry
     def execute_command(self, command_name, *args):
         self.cmd_id += 1
@@ -349,8 +333,6 @@ class ServerPool(object):
                  max_connect_retries=2, reconnect_delay=0.1,
                  socket_timeout=4,
                  encoding='utf-8', encoding_errors='strict'):
-        self.queries = {}
-
         self.max_retries = max_retries
         self.max_connect_retries = max_connect_retries
         self.reconnect_delay = reconnect_delay
@@ -361,7 +343,7 @@ class ServerPool(object):
         self._blacklist = {}
         self._pick_index = 0
         self._pool = ConnectionPool(
-            self._client_factory,
+            self,
             maxsize=max_pool_size,
             wait_for_connection=wait_for_connection,
             max_age=max_age,
@@ -370,16 +352,13 @@ class ServerPool(object):
             self._servers = server.split(';')
         else:
             self._servers = server
-        for attr in dir(self.connection_class):
-            func = getattr(self.connection_class, attr)
-            try:
-                command = func.command
-            except AttributeError:
-                continue
-            if command:
-                def func(name):
-                    return lambda *args, **kwargs: self.call(name, *args, **kwargs)
-                setattr(self, attr, func(attr))
+
+    def __getattr__(self, attr):
+        func = getattr(self.connection_class, attr)
+        command = func.command
+        if not command:
+            raise AttributeError
+        return lambda *args, **kwargs: self.call(attr, *args, **kwargs)
 
     def call(self, name, *args, **kwargs):
         retries = 0
@@ -429,7 +408,6 @@ class ServerPool(object):
         while server is not None:
             host, _, port = server.partition(':')
             connection = self.connection_class(
-                self,
                 host=host,
                 port=int(port or 8890),
                 max_connect_retries=self.max_connect_retries,
@@ -458,3 +436,6 @@ class ServerPool(object):
             raise last_error
         else:
             raise socket.timeout("No server left in the pool")
+
+    def __call__(self, context):
+        return self._client_factory(context)
