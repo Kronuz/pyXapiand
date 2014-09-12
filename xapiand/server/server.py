@@ -12,6 +12,8 @@ import multiprocessing
 
 import gevent
 from gevent import queue, monkey
+from gevent.lock import Semaphore
+from gevent.threadpool import ThreadPool
 monkey.patch_all(thread=False)
 
 from .. import version, json
@@ -663,7 +665,7 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
     mode = "with multiple threads and %s commit slots using %s" % (commit_slots, PQueue.__name__)
     log.warning("Starting Xapiand Server %s %s [%s] (pid:%s)", version, mode, loglevel, os.getpid())
 
-    commit_lock = threading.Semaphore(commit_slots)
+    commit_lock = Semaphore(commit_slots)
     timeouts = Obj(
         timeout=timeout,
         commit=commit_timeout * 1.0,
@@ -684,20 +686,20 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
 
     pq = get_queue(name=QUEUE_WORKER_MAIN, log=log)
 
+    pool_size = 100
+    writers_pool = ThreadPool(pool_size)
+
     def start_writer(db):
         db = build_url(*parse_url(db.strip()))
         name = _database_name(db)
         try:
             tq = None
             t, tq = databases[db]
-            if not t.is_alive():
+            if t.ready():
                 raise KeyError
         except KeyError:
             tq = tq or get_queue(name=os.path.join(data, name), log=log)
-            t = threading.Thread(
-                target=_writer_loop,
-                name=name[:14],
-                args=(databases, databases_pool, db, tq, commit_lock, timeouts, data, log))
+            t = writers_pool.spawn(_writer_loop, databases, databases_pool, db, tq, commit_lock, timeouts, data, log)
             databases[db] = (t, tq)
             t.start()
         return db, name, t, tq

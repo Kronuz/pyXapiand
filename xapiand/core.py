@@ -4,11 +4,14 @@ import os
 import re
 import time
 import logging
-import threading
 import subprocess
 from hashlib import md5
 from collections import deque
 from contextlib import contextmanager
+
+import gevent
+from gevent import pool
+from gevent.lock import RLock
 
 import xapian
 
@@ -71,9 +74,6 @@ def get_slot(name):
 
 
 def _spawn_tcpservers(endpoints):
-    import gevent
-    from gevent import pool
-
     from . import Xapian
 
     servers = {}
@@ -256,7 +256,7 @@ def xapian_spawn(db, spawner=_xapian_spawner, data='.', log=logging):
 
 class CleanableObject(object):
     def __init__(self):
-        self.lock = threading.RLock()
+        self.lock = RLock()
         self.time = time.time()
         self.used = False
         self.cleaned = False
@@ -272,7 +272,7 @@ class CleanableObject(object):
 class CleanablePool(dict):
     def __init__(self, *args, **kwargs):
         super(CleanablePool, self).__init__(*args, **kwargs)
-        self.lock = threading.RLock()
+        self.lock = RLock()
         self.time = time.time()
 
     def cleanup(self, timeout, data='.', log=logging):
