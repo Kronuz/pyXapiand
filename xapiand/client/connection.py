@@ -49,12 +49,12 @@ def command(func=False, **kwargs):
 
 
 class ConnectionPool(object):
-    def __init__(self, factory, maxsize=None, timeout=60,
+    def __init__(self, factory, maxsize=None, max_age=60,
                  wait_for_connection=None):
         self._context_tl = threading.local()
         self.factory = factory
         self.maxsize = maxsize
-        self.timeout = timeout
+        self.max_age = max_age
         self.clients = Queue.PriorityQueue(maxsize)
         self.wait_for_connection = wait_for_connection
         # If there is a maxsize, prime the queue with empty slots.
@@ -85,11 +85,11 @@ class ConnectionPool(object):
                 else:
                     # No maxsize and no free connections, create a new one.
                     # XXX TODO: we should be using a monotonic clock here.
-                    now = int(time.time())
+                    now = time.time()
                     connection = self.factory(self._context_tl)
                     return now, connection
             else:
-                now = int(time.time())
+                now = time.time()
                 # If we got an empty slot placeholder, create a new connection.
                 if connection is None:
                     try:
@@ -101,7 +101,7 @@ class ConnectionPool(object):
                             self.clients.put(EMPTY_SLOT)
                         raise
                 # If the connection is not stale, go ahead and use it.
-                if ts + self.timeout > now:
+                if self.max_age is None or now - ts < self.max_age:
                     connection.context = self._context_tl
                     return ts, connection
                 # Otherwise, the connection is stale.
@@ -114,8 +114,8 @@ class ConnectionPool(object):
         """Return a connection to the pool."""
         # If the connection is now stale, don't return it to the pool.
         # Push an empty slot instead so that it will be refreshed when needed.
-        now = int(time.time())
-        if ts + self.timeout > now:
+        now = time.time()
+        if self.max_age is None or now - ts < self.max_age:
             self.clients.put((ts, connection))
         else:
             if self.maxsize is not None:
@@ -137,7 +137,7 @@ def with_retry(func):
                 exc_info = sys.exc_info()
                 time.sleep(delay)
                 retries += 1
-                delay *= 3      # growing the delay
+                delay *= 3  # growing the delay
 
         raise exc_info[0], exc_info[1], exc_info[2]
     return _with_retry
@@ -148,8 +148,8 @@ class Connection(object):
     delimiter = '\r\n'
 
     def __init__(self, pool, host='localhost', port=8890, endpoints=None,
-                 max_connect_retries=5, reconnect_delay=0.5,
-                 socket_timeout=3, encoding='utf-8',
+                 max_connect_retries=5, reconnect_delay=0.1,
+                 socket_timeout=4, encoding='utf-8',
                  encoding_errors='strict'):
         self.pool = pool
         self.host = host
@@ -223,10 +223,9 @@ class Connection(object):
                     # we're doomed, recreate socket
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.settimeout(self.socket_timeout)
-
                 time.sleep(delay)
                 retries += 1
-                delay *= 2      # growing the delay
+                delay *= 3  # growing the delay
 
         raise exc_info[0], exc_info[1], exc_info[2]
 
@@ -323,19 +322,49 @@ class Connection(object):
 
 
 class ServerPool(object):
-    def __init__(self, server, max_retries=3, max_pool_size=35, socket_timeout=4, blacklist_time=60):
+    """
+    Creates a server pool.
+
+    :param: max_pool_size: size of the pool.
+    :param: blacklist_time: when a connection to a server fails, put the
+            server in a blacklist for this long.
+    :param: max_retries: number of times a command call will be retried
+            (with different connections from the pool).
+    :param: wait_for_connection: how long will it wait for an available
+            connection from the pool.
+    :param: max_age: for how long a connection will remain connected
+            with the server.
+    :param: max_connect_retries: number of times a connection will retry
+            before giving up and give control for trying a command with
+            some other connection in the pool.
+    :param: reconnect_delay: how long will a connection wait before
+            retrying to reconnect.
+    :param: socket_timeout: socket timeout for operations.
+
+    """
+    connection_class = Connection
+
+    def __init__(self, server, max_pool_size=35, blacklist_time=60,
+                 wait_for_connection=None, max_age=60, max_retries=3,
+                 max_connect_retries=2, reconnect_delay=0.1,
+                 socket_timeout=4,
+                 encoding='utf-8', encoding_errors='strict'):
         self.queries = {}
 
         self.max_retries = max_retries
-        self.max_pool_size = max_pool_size
+        self.max_connect_retries = max_connect_retries
+        self.reconnect_delay = reconnect_delay
         self.socket_timeout = socket_timeout
         self.blacklist_time = blacklist_time
+        self.encoding = encoding
+        self.encoding_errors = encoding_errors
         self._blacklist = {}
         self._pick_index = 0
         self._pool = ConnectionPool(
             self._client_factory,
-            maxsize=self.max_pool_size,
-            wait_for_connection=self.socket_timeout,
+            maxsize=max_pool_size,
+            wait_for_connection=wait_for_connection,
+            max_age=max_age,
         )
         if isinstance(server, basestring):
             self._servers = server.split(';')
@@ -399,7 +428,16 @@ class ServerPool(object):
 
         while server is not None:
             host, _, port = server.partition(':')
-            connection = self.connection_class(self, host=host, port=int(port or 8890), socket_timeout=self.socket_timeout)
+            connection = self.connection_class(
+                self,
+                host=host,
+                port=int(port or 8890),
+                max_connect_retries=self.max_connect_retries,
+                reconnect_delay=self.reconnect_delay,
+                socket_timeout=self.socket_timeout,
+                encoding=self.encoding,
+                encoding_errors=self.encoding_errors,
+            )
             connection.context = context
             try:
                 connection.connect()
