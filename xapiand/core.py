@@ -250,7 +250,8 @@ def xapian_spawn(db, spawner=_xapian_spawner, data='.', log=logging):
                     raise KeyError
             except KeyError:
                 raise InvalidIndexError("Cannot spawn xapian TCP server process")
-    server.time = time.time()
+    if server.process:
+        server.time = time.time()
     return server.time, server.address
 
 
