@@ -80,7 +80,7 @@ def command(threaded=False, **kwargs):
         func.threaded = threaded
         for attr, value in kwargs.items():
             setattr(func, attr, value)
-        if threaded:
+        if func.threaded:
             @wraps(func)
             def wrapped(self, command, client_socket, *args, **kwargs):
                 current_thread = threading.current_thread()

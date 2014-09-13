@@ -234,7 +234,7 @@ class XapiandReceiver(CommandReceiver):
             return
 
     @command(threaded=True, db=True, reopen=True)
-    def facets(self, line, dead):
+    def facets(self, line='', dead=False):
         query = search_parser(line)
         query['facets'] = query['facets'] or query['search']
         query['search'] = '*'
@@ -249,7 +249,7 @@ class XapiandReceiver(CommandReceiver):
     """ + search_parser.__doc__
 
     @command(threaded=True, db=True, reopen=True)
-    def terms(self, line, dead):
+    def terms(self, line='', dead=False):
         query = search_parser(line)
         del query['facets']
         return self._search(query, get_matches=True, get_data=False, get_terms=True, get_size=True, dead=dead)
@@ -260,7 +260,7 @@ class XapiandReceiver(CommandReceiver):
     """ + search_parser.__doc__
 
     @command(threaded=True, db=True, reopen=True)
-    def find(self, line, dead):
+    def find(self, line='', dead=False):
         query = search_parser(line)
         return self._search(query, get_matches=True, get_data=False, get_terms=False, get_size=True, dead=dead)
     find.__doc__ = """
@@ -270,7 +270,7 @@ class XapiandReceiver(CommandReceiver):
     """ + search_parser.__doc__
 
     @command(threaded=True, db=True, reopen=True)
-    def search(self, line, dead):
+    def search(self, line='', dead=False):
         query = search_parser(line)
         return self._search(query, get_matches=True, get_data=True, get_terms=False, get_size=True, dead=dead)
     search.__doc__ = """
