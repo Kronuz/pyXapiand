@@ -3,13 +3,13 @@ from __future__ import unicode_literals, absolute_import
 import time
 import threading
 import logging
+from hashlib import md5
 
 from functools import wraps
 
 from gevent import socket
 from gevent.server import StreamServer
 from gevent.threadpool import ThreadPool
-
 from ..utils import format_time
 
 
@@ -85,7 +85,8 @@ def command(threaded=False, **kwargs):
             def wrapped(self, command, _sock, *args, **kwargs):
                 current_thread = threading.current_thread()
                 tid = current_thread.name.rsplit('-', 1)[-1]
-                current_thread.name = 'Command-%s-%s' % (command.cmd, tid)
+                current_thread.name = '%s-%s-%s' % (self.client_id[:14], command.cmd, tid)
+
                 client_socket = socket.socket(_sock=_sock)  # Create a gevent socket from the raw socket
                 self.client_socket = client_socket
                 self.socket_file = client_socket.makefile()
@@ -120,6 +121,11 @@ class ClientReceiver(object):
         self.encoding_errors = encoding_errors
         self.cmd_id = 0
         self.activity = time.time()
+
+        self.client_id = ("Client-%s" % md5('%s:%s' % (address[0], address[1])).hexdigest())
+        current_thread = threading.current_thread()
+        tid = current_thread.name.rsplit('-', 1)[-1]
+        current_thread.name = '%s-%s' % (self.client_id[:14], tid)
 
     def close(self):
         self.closed = True
@@ -174,10 +180,10 @@ class ClientReceiver(object):
             except DeadException:
                 command.cancelled()
 
-    def connectionMade(self):
+    def connectionMade(self, client):
         pass
 
-    def connectionLost(self):
+    def connectionLost(self, client):
         pass
 
     def sendLine(self, line):
@@ -210,12 +216,12 @@ class CommandServer(StreamServer):
         client = self.buildClient(client_socket, address)
 
         self.clients.add(client)
-        client.connectionMade()
+        client.connectionMade(client)
         try:
             client.handle()
         finally:
             self.clients.discard(client)
-            client.connectionLost()
+            client.connectionLost(client)
 
     def close(self, timeout=None):
         if self.closed:
@@ -239,6 +245,8 @@ class CommandServer(StreamServer):
         for client in clean:
             self.clients.discard(client)
 
+        return bool(self.clients)
+
 
 class CommandReceiver(ClientReceiver):
     welcome = "# Welcome to the server! Type quit to exit."
@@ -247,13 +255,13 @@ class CommandReceiver(ClientReceiver):
         self._weak = False
         super(CommandReceiver, self).__init__(*args, **kwargs)
 
-    def connectionMade(self):
-        self.log.info("New connection from %s:%d (%d open connections)" % (self.address[0], self.address[1], len(self.server.clients)))
+    def connectionMade(self, client):
+        self.log.info("New connection from %s: %s:%d (%d open connections)" % (client.client_id, self.address[0], self.address[1], len(self.server.clients)))
         if self.welcome:
             self.sendLine(self.welcome)
 
-    def connectionLost(self):
-        self.log.info("Lost connection from %s:%d (%d open connections)" % (self.address[0], self.address[1], len(self.server.clients)))
+    def connectionLost(self, client):
+        self.log.info("Lost connection (%d open connections)" % len(self.server.clients))
 
     def lineReceived(self, line):
         super(CommandReceiver, self).lineReceived(line)

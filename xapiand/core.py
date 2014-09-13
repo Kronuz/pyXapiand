@@ -15,7 +15,7 @@ from gevent.lock import RLock
 
 import xapian
 
-from .exceptions import InvalidIndexError
+from .exceptions import XapianError, InvalidIndexError
 from .serialise import serialise_value, normalize
 from .utils import parse_url, build_url
 from .platforms import pid_exists
@@ -161,11 +161,11 @@ def _xapian_database_open(path, writable, create, data='.', log=logging):
                     database.close()
                 database = xapian.Database(path)
     except xapian.DatabaseLockError as exc:
-        raise InvalidIndexError('Unable to lock index at %s: %s' % (path, exc))
+        raise InvalidIndexError("Unable to lock index at %s: %s" % (path, exc))
     except xapian.DatabaseOpeningError as exc:
-        raise InvalidIndexError('Unable to open index at %s: %s' % (path, exc))
+        raise InvalidIndexError("Unable to open index at %s: %s" % (path, exc))
     except xapian.DatabaseError as exc:
-        raise InvalidIndexError('Unable to use index at %s: %s' % (path, exc))
+        raise InvalidIndexError("Unable to use index at %s: %s" % (path, exc))
     return database
 
 
@@ -175,8 +175,9 @@ def _xapian_database_connect(host, port, timeout, writable, data='.', log=loggin
             database = xapian.remote_open_writable(host, port, timeout)
         else:
             database = xapian.remote_open(host, port, timeout)
+        database.keep_alive()
     except xapian.NetworkError:
-        raise InvalidIndexError(u'Unable to connect to index at %s:%s' % (host, port))
+        raise InvalidIndexError("Unable to connect to index at %s:%s" % (host, port))
     return database
 
 
@@ -588,7 +589,7 @@ def xapian_commit(database, db, data='.', log=logging):
         return
 
     subdatabase.commit()
-    log.debug('Commit executed: %s', db)
+    log.debug("Commit executed: %s", db)
 
 
 def xapian_cleanup(databases_pool, timeout, data='.', log=logging):
@@ -597,3 +598,66 @@ def xapian_cleanup(databases_pool, timeout, data='.', log=logging):
 
 
 tcpservers = TcpPool()
+
+
+def get_document(database, docid, data='.', log=logging):
+    try:
+        document = database.get_document(docid)
+    except (xapian.NetworkError, xapian.DatabaseError):
+        _database = xapian_reopen(database, data=data, log=log)
+        if database != _database:
+            database = _database
+        try:
+            document = database.get_document(docid)
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            raise XapianError(exc)
+    return database, document
+
+
+def get_value(database, document, slot, data='.', log=logging):
+    try:
+        value = document.get_value(slot)
+    except (xapian.NetworkError, xapian.DatabaseError):
+        _database = xapian_reopen(database, data=data, log=log)
+        if database != _database:
+            database = _database
+            document = database.get_document(document.get_docid())
+        try:
+            value = document.get_value(slot)
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            raise XapianError(exc)
+    return database, value
+
+
+def get_data(database, document, data='.', log=logging):
+    try:
+        _data = document.get_data()
+    except xapian.DocNotFoundError:
+        return
+    except (xapian.NetworkError, xapian.DatabaseError):
+        _database = xapian_reopen(database, data=data, log=log)
+        if database != _database:
+            database = _database
+            document = database.get_document(document.get_docid())
+        try:
+            _data = document.get_data()
+        except xapian.DocNotFoundError:
+            return
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            raise XapianError(exc)
+    return database, _data
+
+
+def get_termlist(database, document, data='.', log=logging):
+    try:
+        termlist = document.termlist()
+    except (xapian.NetworkError, xapian.DatabaseError):
+        _database = xapian_reopen(database, data=data, log=log)
+        if database != _database:
+            database = _database
+            document = database.get_document(document.get_docid())
+        try:
+            termlist = document.termlist()
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            raise XapianError(exc)
+    return database, termlist

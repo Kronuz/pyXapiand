@@ -1,20 +1,18 @@
 from __future__ import unicode_literals, absolute_import
 
-import os
-import sys
-import time
-import signal
-import Queue
-from hashlib import md5
-
-import threading
-import multiprocessing
-
 import gevent
 from gevent import queue, monkey
 from gevent.lock import Semaphore
 from gevent.threadpool import ThreadPool
-monkey.patch_all(thread=False)
+monkey.patch_all()
+
+import os
+import sys
+import time
+import Queue
+import signal
+import threading
+from hashlib import md5
 
 from .. import version, json
 from ..exceptions import InvalidIndexError, XapianError
@@ -25,7 +23,7 @@ from ..parser import index_parser, search_parser
 from ..search import Search
 
 from .base import CommandReceiver, CommandServer, command
-from .logging import QueueHandler, ColoredStreamHandler
+from .logging import ColoredStreamHandler
 try:
     from .queue.redis import RedisQueue
 except ImportError:
@@ -54,8 +52,8 @@ WRITERS_POOL_SIZE = 10
 COMMANDS_POOL_SIZE = 20
 
 WRITERS_FILE = 'Xapian-Writers.db'
-QUEUE_WORKER_MAIN = 'Xapian-Worker'
-QUEUE_WORKER_THREAD = 'Xapian-%s'
+QUEUE_WRITER_MAIN = 'Xapian-Worker'
+QUEUE_WRITER_THREAD = 'Writer-%s'
 
 MAIN_QUEUE = queue.Queue()
 QUEUES = {}
@@ -464,7 +462,7 @@ def _flush_queue(queue):
 
 
 def _database_name(db):
-    return QUEUE_WORKER_THREAD % md5(db).hexdigest()
+    return QUEUE_WRITER_THREAD % md5(db).hexdigest()
 
 
 def _database_command(database, cmd, db, args, data='.', log=logging):
@@ -539,7 +537,7 @@ def _enqueue(msg, queue, data='.', log=logging):
 
 def _xapian_init(endpoints, queue=None, data='.', log=logging):
     if not queue:
-        queue = get_queue(name=QUEUE_WORKER_MAIN, log=log)
+        queue = get_queue(name=QUEUE_WRITER_MAIN, log=log)
     _enqueue(('INIT', endpoints, ()), queue=queue, data=data, log=log)
 
 
@@ -574,10 +572,10 @@ def _writer_loop(databases, databases_pool, db, tq, commit_lock, timeouts, data,
     current_thread.name = '%s-%s' % (name[:14], tid)
 
     start = last = time.time()
-    log.debug("New writer %s: %s", name, db)
 
     # Open the database
     with xapian_database(databases_pool, (db,), writable=True, create=True, data=data, log=log) as database:
+        log.info("New writer %s: %s (%s)", name, db, database.get_uuid())
         msg = None
         timeout = timeouts.timeout
         while not STOPPED:
@@ -621,7 +619,25 @@ def _writer_loop(databases, databases_pool, db, tq, commit_lock, timeouts, data,
     log.debug("Writer %s ended! ~ lived for %s", name, format_time(time.time() - start))
 
 
-def logger_run(loglevel, log_queue, logfile, pidfile):
+def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=0,
+        working_directory=None, verbosity=2, commit_slots=None, commit_timeout=None,
+        port=None, queue=None, **options):
+    global PQueue, STOPPED
+
+    current_thread = threading.current_thread()
+    tid = current_thread.name.rsplit('-', 1)[-1]
+    current_thread.name = 'Server-%s' % tid
+
+    if pidfile:
+        create_pidlock(pidfile)
+
+    address, _, port = port.partition(':')
+    if not port:
+        port, address = address, ''
+    port = int(port)
+
+    loglevel = ['ERROR', 'WARNING', 'INFO', 'DEBUG'][3 if verbosity == 'v' else int(verbosity)]
+
     log = logging.getLogger()
     log.setLevel(loglevel)
     if len(log.handlers) < 1:
@@ -634,34 +650,6 @@ def logger_run(loglevel, log_queue, logfile, pidfile):
             console = ColoredStreamHandler(sys.stderr)
             console.setFormatter(formatter)
             log.addHandler(console)
-
-    log.warning("Starting Xapiand Logger (pid:%s)", os.getpid())
-
-    quit = 0
-    while True:
-        try:
-            record = log_queue.get()
-            if record is None:  # We send this as a sentinel to tell the listener to quit.
-                break
-            log.handle(record)  # No level or filter logic applied - just do it!
-        except (KeyboardInterrupt, SystemExit):
-            if quit >= 3:
-                raise
-            quit += 1
-            continue
-        except:
-            import traceback
-            traceback.print_exc(file=sys.stderr)
-
-    log.warning("Xapiand Logger ended! (pid:%s)", os.getpid())
-
-
-def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout, data):
-    global PQueue, STOPPED
-
-    log = logging.getLogger()
-    log.addHandler(QueueHandler(log_queue))
-    log.setLevel(loglevel)
 
     if not commit_slots:
         commit_slots = COMMIT_SLOTS
@@ -697,7 +685,7 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
         log.error("Cannot start server: %s", exc)
         sys.exit(-1)
 
-    pq = get_queue(name=QUEUE_WORKER_MAIN, log=log)
+    pq = get_queue(name=QUEUE_WRITER_MAIN, log=log)
 
     pool_size = WRITERS_POOL_SIZE
     pool_size_warning = int(pool_size / 3.0 * 2.0)
@@ -764,7 +752,8 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
     while True:
         if gevent.wait(timeout=5):
             break
-        xapian_server.close(10)
+        if not xapian_server.close(10):
+            break
 
     PQueue.STOPPED = STOPPED = time.time()
 
@@ -789,58 +778,4 @@ def server_run(loglevel, log_queue, address, port, commit_slots, commit_timeout,
 
     log.warning("Xapiand Server ended! (pid:%s)", os.getpid())
 
-
-def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=0,
-        working_directory=None, verbosity=2, commit_slots=None, commit_timeout=None,
-        port=None, queue=None, **options):
-    logger_job = server_job = None
-
-    if pidfile:
-        create_pidlock(pidfile)
-
-    address, _, port = port.partition(':')
-    if not port:
-        port, address = address, ''
-    port = int(port)
-
-    loglevel = ['ERROR', 'WARNING', 'INFO', 'DEBUG'][3 if verbosity == 'v' else int(verbosity)]
-    log_queue = multiprocessing.Queue()
-
-    logger_job = multiprocessing.Process(
-        name="LoggerProcess",
-        target=logger_run,
-        args=(loglevel, log_queue, logfile, pidfile),
-    )
-    logger_job.daemon = True
-    logger_job.start()
-
-    server_job = multiprocessing.Process(
-        name="ServerProcess",
-        target=server_run,
-        args=(loglevel, log_queue, address, port, commit_slots, commit_timeout, data),
-    )
-    server_job.daemon = True
-    server_job.start()
-
-    quit = 0
-    while True:
-        try:
-            if server_job:
-                server_job.join()
-
-            log_queue.put_nowait(None)
-            logger_job.join()
-
-            break
-        except (KeyboardInterrupt, SystemExit):
-            if quit >= 3:
-                if server_job:
-                    server_job.terminate()
-
-                logger_job.terminate()
-                raise
-            quit += 1
-            continue
-        except:
-            import traceback
-            traceback.print_exc(file=sys.stderr)
+    gevent.wait()

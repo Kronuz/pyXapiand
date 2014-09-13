@@ -6,7 +6,7 @@ import logging
 import xapian
 
 from . import json
-from .core import xapian_reopen, get_slot, expand_terms, find_terms, DOCUMENT_CUSTOM_TERM_PREFIX
+from .core import xapian_reopen, get_slot, expand_terms, find_terms, get_document, get_data, get_value, get_termlist, DOCUMENT_CUSTOM_TERM_PREFIX
 from .serialise import normalize, serialise_value
 from .exceptions import XapianError
 
@@ -230,7 +230,9 @@ class Search(object):
         try:
             doccount = self.database.get_doccount()
         except (xapian.NetworkError, xapian.DatabaseModifiedError):
-            self.database = xapian_reopen(self.database, data=self.data, log=self.log)
+            database = xapian_reopen(self.database, data=self.data, log=self.log)
+            if self.database != database:
+                self.database = database
             doccount = self.database.get_doccount()
 
         maxitems = max(min(self.maxitems, doccount - self.first, MAX_DOCS), 0)
@@ -243,12 +245,14 @@ class Search(object):
             enquire = self.get_enquire(self.database)
             matches = enquire.get_mset(self.first, maxitems, check_at_least)
         except (xapian.NetworkError, xapian.DatabaseModifiedError):
-            self.database = xapian_reopen(self.database, data=self.data, log=self.log)
+            database = xapian_reopen(self.database, data=self.data, log=self.log)
+            if self.database != database:
+                self.database = database
             try:
                 enquire = self.get_enquire(self.database)
                 matches = enquire.get_mset(self.first, maxitems, check_at_least)
-            except (xapian.NetworkError, xapian.DatabaseError) as e:
-                raise XapianError(e)
+            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+                raise XapianError(exc)
 
         self.produced = 0
         self.estimated = None
@@ -273,30 +277,23 @@ class Search(object):
 
         produced = 0
         for match in matches:
+            docid = match.docid
+            self.database, document = get_document(self.database, docid, data=self.data, log=self.log)
+
             self.dead or 'alive'  # Raises DeadException when needed
-            try:
-                id = match.document.get_value(get_slot('id'))
-            except (xapian.NetworkError, xapian.DatabaseModifiedError):
-                self.database = xapian_reopen(self.database, data=self.data, log=self.log)
-                id = match.document.get_value(get_slot('id'))
+            self.database, id = get_value(self.database, document, get_slot('id'), data=self.data, log=self.log)
+
             produced += 1
             result = {
                 'id': id,
-                'docid': match.docid,
+                'docid': docid,
                 'rank': match.rank,
                 'weight': match.weight,
                 'percent': match.percent,
             }
             if self.get_data:
-                try:
-                    data = match.document.get_data()
-                except (xapian.NetworkError, xapian.DatabaseModifiedError):
-                    self.database = xapian_reopen(self.database, data=self.data, log=self.log)
-                    try:
-                        data = match.document.get_data()
-                    except xapian.NetworkError as e:
-                        raise XapianError(e)
-                except xapian.DocNotFoundError:
+                self.database, data = get_data(self.database, document, data=self.data, log=self.log)
+                if data is None:
                     continue
                 try:
                     data = json.loads(data)
@@ -307,7 +304,8 @@ class Search(object):
                 })
             if self.get_terms:
                 terms = []
-                for t in match.document.termlist():
+                self.database, termlist = get_termlist(self.database, document, data=self.data, log=self.log)
+                for t in termlist:
                     self.dead or 'alive'  # Raises DeadException when needed
                     terms.append(t.term.decode('utf-8'))
                 result.update({
