@@ -245,10 +245,11 @@ class CommandServer(StreamServer):
                 except AttributeError:
                     pass
                 clean.append(client)
+
         for client in clean:
             self.clients.discard(client)
 
-        return bool(self.clients)
+        return not bool(self.clients)
 
 
 class CommandReceiver(ClientReceiver):

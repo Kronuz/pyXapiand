@@ -1,10 +1,9 @@
 from __future__ import unicode_literals, absolute_import
 
 import gevent
-from gevent import queue, monkey
+from gevent import queue
 from gevent.lock import Semaphore
 from gevent.threadpool import ThreadPool
-monkey.patch_all()
 
 import os
 import sys
@@ -465,7 +464,7 @@ def _database_name(db):
     return QUEUE_WRITER_THREAD % md5(db).hexdigest()
 
 
-def _database_command(database, cmd, db, args, data='.', log=logging):
+def _database_command(database, cmd, args, data='.', log=logging):
     unknown = False
     start = time.time()
     if cmd in ('INDEX', 'CINDEX'):
@@ -477,15 +476,15 @@ def _database_command(database, cmd, db, args, data='.', log=logging):
     docid = None
     try:
         if cmd == 'INDEX':
-            docid = xapian_index(database, db, *args, data=data, log=log)
+            database, docid = xapian_index(database, *args, data=data, log=log)
         elif cmd == 'CINDEX':
-            docid = xapian_index(database, db, *args, commit=True, data=data, log=log)
+            database, docid = xapian_index(database, *args, commit=True, data=data, log=log)
         elif cmd == 'DELETE':
-            xapian_delete(database, db, *args, data=data, log=log)
+            database = xapian_delete(database, *args, data=data, log=log)
         elif cmd == 'CDELETE':
-            xapian_delete(database, db, *args, commit=True, data=data, log=log)
+            database = xapian_delete(database, *args, commit=True, data=data, log=log)
         elif cmd == 'COMMIT':
-            xapian_commit(database, db, *args, data=data, log=log)
+            database = xapian_commit(database, *args, data=data, log=log)
         else:
             unknown = True
     except Exception as exc:
@@ -493,8 +492,8 @@ def _database_command(database, cmd, db, args, data='.', log=logging):
         raise
     duration = time.time() - start
     docid = ' -> %s' % docid if docid else ''
-    log.debug("Executed %s %s(%s)%s (%s) ~%s", "unknown command" if unknown else "command", cmd, arg, docid, db, format_time(duration))
-    return db if cmd in ('INDEX', 'DELETE') else None  # Return db if it needs to be committed.
+    log.debug("Executed %s %s(%s)%s (%s) ~%s", "unknown command" if unknown else "command", cmd, arg, docid, database._db, format_time(duration))
+    return database
 
 
 def _database_commit(database, to_commit, commit_lock, timeouts, force=False, data='.', log=logging):
@@ -520,11 +519,13 @@ def _database_commit(database, to_commit, commit_lock, timeouts, force=False, da
                     log.warning("Out of commit slots, commit delayed! (%s)", db)
         if do_commit:
             try:
-                _database_command(database, 'COMMIT', db, (), data=data, log=log)
+                database = _database_command(database, 'COMMIT', (), data=data, log=log)
                 del to_commit[db]
             finally:
                 if locked:
                     commit_lock.release()
+
+    return database
 
 
 def _enqueue(msg, queue, data='.', log=logging):
@@ -573,6 +574,11 @@ def _writer_loop(databases, databases_pool, db, tq, commit_lock, timeouts, data,
 
     start = last = time.time()
 
+    # Create a gevent Queue for this thread from the other tread's Queue
+    # (using the raw underlying deque, 'queue'):
+    queue = type(tq)(tq.maxsize)
+    queue.queue = tq.queue
+
     # Open the database
     with xapian_database(databases_pool, (db,), writable=True, create=True, data=data, log=log) as database:
         log.info("New writer %s: %s (%s)", name, db, database.get_uuid())
@@ -583,7 +589,7 @@ def _writer_loop(databases, databases_pool, db, tq, commit_lock, timeouts, data,
 
             now = time.time()
             try:
-                msg = tq.get(True, timeout)
+                msg = queue.get(True, timeout)
             except Queue.Empty:
                 if now - last > DATABASE_MAX_LIFE:
                     log.debug("Writer timeout... stopping!")
@@ -603,14 +609,14 @@ def _writer_loop(databases, databases_pool, db, tq, commit_lock, timeouts, data,
                     continue
 
                 last = now
-                needs_commit = _database_command(database, cmd, db, args, data=data, log=log)
+                database = _database_command(database, cmd, args, data=data, log=log)
 
-                if needs_commit:
+                if cmd in ('INDEX', 'DELETE'):
                     now = time.time()
-                    if needs_commit in to_commit:
-                        to_commit[needs_commit] = (to_commit[needs_commit][0], to_commit[needs_commit][1], now)
+                    if db in to_commit:
+                        to_commit[db] = (to_commit[db][0], to_commit[db][1], now)
                     else:
-                        to_commit[needs_commit] = (now, now, now)
+                        to_commit[db] = (now, now, now)
 
         _database_commit(database, to_commit, commit_lock, timeouts, force=True, data=data, log=log)
         xapian_close(database, data=data, log=log)
@@ -750,13 +756,13 @@ def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask
 
     log.debug("Waiting for connected clients to disconnect...")
     while True:
+        if xapian_server.close(10):
+            break
         if gevent.wait(timeout=5):
             break
-        if not xapian_server.close(10):
-            break
 
+    # Stop queues:
     PQueue.STOPPED = STOPPED = time.time()
-
     if PQueue.persistent:
         with open(writers_file, 'wt') as epfile:
             for db, (t, tq) in databases.items():
@@ -770,7 +776,7 @@ def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask
         except Queue.Full:
             log.error("Cannot send command to queue! (1)")
 
-    log.debug("Worker joining %s threads...", len(databases))
+    log.debug("Waiting for %s writers...", len(databases))
     for t, tq in databases.values():
         t.wait()
 
