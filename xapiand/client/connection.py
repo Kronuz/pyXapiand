@@ -136,7 +136,8 @@ class Connection(object):
     def __init__(self, host='localhost', port=8890, endpoints=None,
                  max_connect_retries=5, reconnect_delay=0.1,
                  socket_timeout=4, encoding='utf-8',
-                 encoding_errors='strict'):
+                 encoding_errors='strict', socket_class=socket.socket):
+        self.socket_class = socket_class
         self.host = host
         self.port = port
         self.endpoints = endpoints
@@ -187,7 +188,7 @@ class Connection(object):
 
     def _connect(self):
         "Create a TCP socket connection"
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock = self.socket_class(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(self.socket_timeout)
 
         retries = 0
@@ -203,7 +204,7 @@ class Connection(object):
                     return sock   # we're good
                 if exc.errno == EINVAL:
                     # we're doomed, recreate socket
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock = self.socket_class(socket.AF_INET, socket.SOCK_STREAM)
                     sock.settimeout(self.socket_timeout)
                 time.sleep(delay)
                 retries += 1
@@ -323,8 +324,9 @@ class ServerPool(object):
     def __init__(self, servers, max_pool_size=35, blacklist_time=60,
                  wait_for_connection=None, max_age=60, max_retries=3,
                  max_connect_retries=2, reconnect_delay=0.1,
-                 socket_timeout=4,
+                 socket_timeout=4, socket_class=socket.socket,
                  encoding='utf-8', encoding_errors='strict'):
+        self.socket_class = socket_class
         self.max_retries = max_retries
         self.max_connect_retries = max_connect_retries
         self.reconnect_delay = reconnect_delay
@@ -407,6 +409,7 @@ class ServerPool(object):
                 socket_timeout=self.socket_timeout,
                 encoding=self.encoding,
                 encoding_errors=self.encoding_errors,
+                socket_class=self.socket_class,
             )
             connection.context = context
             try:

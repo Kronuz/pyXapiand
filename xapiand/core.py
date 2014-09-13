@@ -10,7 +10,7 @@ from collections import deque
 from contextlib import contextmanager
 
 import gevent
-from gevent import pool
+from gevent import pool, socket
 from gevent.lock import RLock
 
 import xapian
@@ -93,6 +93,7 @@ def _spawn_tcpservers(endpoints, data='.', log=logging):
             max_connect_retries=1,
             socket_timeout=1,
             weak=True,
+            socket_class=socket.socket,
         ))
         time_, address = xapiand.spawn(db)
         server = TcpDatabase(db, None, address)
