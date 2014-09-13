@@ -70,6 +70,7 @@ class XapiandReceiver(CommandReceiver):
     def __init__(self, *args, **kwargs):
         data = kwargs.pop('data', '.')
         super(XapiandReceiver, self).__init__(*args, **kwargs)
+        self._do_create = False
         self._do_reopen = False
         self._do_init = set()
         self._inited = set()
@@ -85,12 +86,10 @@ class XapiandReceiver(CommandReceiver):
             self._reopen()
         super(XapiandReceiver, self).dispatch(func, line, command)
 
-    def _reopen(self, create=False, endpoints=None):
+    def _reopen(self, endpoints=None):
         endpoints = endpoints or self.active_endpoints
-
-        with xapian_database(self.databases_pool, endpoints, writable=False, create=create, reopen=True, data=self.data, log=self.log):
-            self._do_reopen = False
-            self._do_init.add(endpoints)
+        self._do_init.add(endpoints)
+        self._do_reopen = True
 
     @command
     def version(self, line):
@@ -133,7 +132,8 @@ class XapiandReceiver(CommandReceiver):
         if endpoint:
             endpoints = (endpoint,)
             try:
-                self._reopen(create=True, endpoints=endpoints)
+                self._do_create = True
+                self._reopen(endpoints=endpoints)
                 self.active_endpoints = endpoints
             except InvalidIndexError as exc:
                 self.sendLine(">> ERR: CREATE: %s" % exc)
@@ -158,7 +158,8 @@ class XapiandReceiver(CommandReceiver):
         if endpoints:
             endpoints = tuple(endpoints.split())
             try:
-                self._reopen(create=False, endpoints=endpoints)
+                self._do_create = False
+                self._reopen(endpoints=endpoints)
                 self.active_endpoints = endpoints
             except InvalidIndexError as exc:
                 self.sendLine(">> ERR: OPEN: %s" % exc)
@@ -184,7 +185,8 @@ class XapiandReceiver(CommandReceiver):
         if endpoints:
             endpoints = tuple(endpoints.split())
             try:
-                self._reopen(create=True, endpoints=endpoints)
+                self._do_create = True
+                self._reopen(endpoints=endpoints)
                 self.active_endpoints = endpoints
             except InvalidIndexError as exc:
                 self.sendLine(">> ERR: USING: %s" % exc)
@@ -196,7 +198,8 @@ class XapiandReceiver(CommandReceiver):
 
     def _search(self, query, get_matches, get_data, get_terms, get_size, dead, counting=False):
         try:
-            with xapian_database(self.databases_pool, self.active_endpoints, writable=False, data=self.data, log=self.log) as database:
+            reopen, self._do_reopen = self._do_reopen, False
+            with xapian_database(self.databases_pool, self.active_endpoints, writable=False, create=self._do_create, reopen=reopen, data=self.data, log=self.log) as database:
                 start = time.time()
 
                 search = Search(
@@ -290,7 +293,8 @@ class XapiandReceiver(CommandReceiver):
             del query['sort_by']
             return self._search(query, get_matches=False, get_data=False, get_terms=False, get_size=True, dead=False, counting=True)  # dead is False because command it's not threaded
         try:
-            with xapian_database(self.databases_pool, self.active_endpoints, writable=False, data=self.data, log=self.log) as database:
+            reopen, self._do_reopen = self._do_reopen, False
+            with xapian_database(self.databases_pool, self.active_endpoints, writable=False, create=self._do_create, reopen=reopen, data=self.data, log=self.log) as database:
                 size = database.get_doccount()
                 self.sendLine(">> OK: %s documents found in %s" % (size, format_time(time.time() - start)))
                 return size
@@ -315,7 +319,7 @@ class XapiandReceiver(CommandReceiver):
                 self._inited.add(endpoints)
 
     def _delete(self, line, commit):
-        self._do_reopen = True
+        self._reopen()
         for db in self.active_endpoints:
             _xapian_delete(db, line, commit=commit, data=self.data, log=self.log)
         self.sendLine(">> OK")
@@ -342,14 +346,12 @@ class XapiandReceiver(CommandReceiver):
         self._delete(line, True)
 
     def _index(self, line, commit, **kwargs):
-        self._do_reopen = True
         result = index_parser(line)
         if isinstance(result, tuple):
             endpoints, document = result
             if not endpoints:
                 endpoints = self.active_endpoints
-            else:
-                self._do_init.add(endpoints)
+            self._reopen(endpoints)
             if not endpoints:
                 self.sendLine(">> ERR: %s" % "You must connect to a database first")
                 return
@@ -386,7 +388,7 @@ class XapiandReceiver(CommandReceiver):
         Usage: COMMIT
 
         """
-        self._do_reopen = True
+        self._reopen()
         for db in self.active_endpoints:
             _xapian_commit(db, data=self.data, log=self.log)
         self.sendLine(">> OK")
