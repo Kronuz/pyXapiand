@@ -14,21 +14,36 @@ MAX_DOCS = 10000
 
 
 class Search(object):
-    def __init__(self, database, obj,
+    def __init__(self, database, search,
                  get_matches=True, get_data=True, get_terms=False, get_size=False,
                  data='.', log=logging, dead=False):
-        self.log = log
-        self.data = data
+        self.database = database
+        self.search = search
+
         self.get_matches = get_matches
         self.get_terms = get_terms
         self.get_data = get_data
         self.get_size = get_size
-        self.size = None
+
+        self.data = data
+        self.log = log
         self.dead = dead
 
-        # SEARCH
+        self.spies = {}
+        self.warnings = []
+        self.produced = 0
+
+        self.size = None
+        self.facets = self.search.get('facets')
+        self.check_at_least = self.search.get('check_at_least', MAX_DOCS if self.facets else 0)
+        self.maxitems = self.search.get('maxitems', MAX_DOCS)
+        self.first = self.search.get('first', 0)
+
+        self.setup()
+
+    def setup(self):
         queryparser = xapian.QueryParser()
-        queryparser.set_database(database)
+        queryparser.set_database(self.database)
 
         query = None
 
@@ -45,7 +60,7 @@ class Search(object):
                     prefixes.add(term_field)
 
         # Build final query:
-        search = obj.get('search')
+        search = self.search.get('search')
         if search:
             if not isinstance(search, (tuple, list)):
                 search = [search]
@@ -58,7 +73,7 @@ class Search(object):
             if not query:
                 search = normalize(search).encode('utf-8')
 
-                ranges = obj.get('ranges')
+                ranges = self.search.get('ranges')
                 if ranges:
                     _ranges = set()
                     for field, begin, end in ranges:
@@ -91,11 +106,11 @@ class Search(object):
                 try:
                     query = queryparser.parse_query(search, flags)
                 except (xapian.NetworkError, xapian.DatabaseModifiedError):
-                    database = xapian_reopen(database, data=self.data, log=self.log)
-                    queryparser.set_database(database)
+                    self.database = xapian_reopen(self.database, data=self.data, log=self.log)
+                    queryparser.set_database(self.database)
                     query = queryparser.parse_query(search, flags)
 
-        partials = obj.get('partials')
+        partials = self.search.get('partials')
         if partials:
             if not isinstance(partials, (tuple, list)):
                 partials = [partials]
@@ -110,8 +125,8 @@ class Search(object):
                 try:
                     _partials_query = queryparser.parse_query(partial, flags)
                 except (xapian.NetworkError, xapian.DatabaseModifiedError):
-                    database = xapian_reopen(database, data=self.data, log=self.log)
-                    queryparser.set_database(database)
+                    self.database = xapian_reopen(self.database, data=self.data, log=self.log)
+                    queryparser.set_database(self.database)
                     _partials_query = queryparser.parse_query(partial, flags)
                 if partials_query:
                     partials_query = xapian.Query(
@@ -130,7 +145,7 @@ class Search(object):
             else:
                 query = partials_query
 
-        terms = obj.get('terms')
+        terms = self.search.get('terms')
         if terms:
             if not isinstance(terms, (tuple, list)):
                 terms = [terms]
@@ -142,8 +157,8 @@ class Search(object):
                 try:
                     terms_query = queryparser.parse_query(term, flags)
                 except (xapian.NetworkError, xapian.DatabaseModifiedError):
-                    database = xapian_reopen(database, data=self.data, log=self.log)
-                    queryparser.set_database(database)
+                    self.database = xapian_reopen(self.database, data=self.data, log=self.log)
+                    queryparser.set_database(self.database)
                     terms_query = queryparser.parse_query(term, flags)
                 if query:
                     query = xapian.Query(
@@ -160,17 +175,12 @@ class Search(object):
             else:
                 query = xapian.Query()
 
-        self.database = database
         self.query = query
-        self.facets = obj.get('facets')
-        self.check_at_least = obj.get('check_at_least', MAX_DOCS if self.facets else 0)
-        self.maxitems = obj.get('maxitems', MAX_DOCS)
-        self.first = obj.get('first', 0)
-        self.sort_by = obj.get('sort_by')
-        self.distinct = obj.get('distinct')
-        self.sort_by_reversed = obj.get('sort_by_reversed')
+        self.sort_by = self.search.get('sort_by')
+        self.distinct = self.search.get('distinct')
+        self.sort_by_reversed = self.search.get('sort_by_reversed')
 
-    def get_enquire(self, database):
+    def get_enquire(self):
         enquire = xapian.Enquire(self.database)
         # enquire.set_weighting_scheme(xapian.BoolWeight())
         # enquire.set_docid_order(xapian.Enquire.DONT_CARE)
@@ -242,14 +252,14 @@ class Search(object):
             maxitems = 0
 
         try:
-            enquire = self.get_enquire(self.database)
+            enquire = self.get_enquire()
             matches = enquire.get_mset(self.first, maxitems, check_at_least)
         except (xapian.NetworkError, xapian.DatabaseModifiedError):
             database = xapian_reopen(self.database, data=self.data, log=self.log)
             if self.database != database:
                 self.database = database
             try:
-                enquire = self.get_enquire(self.database)
+                enquire = self.get_enquire()
                 matches = enquire.get_mset(self.first, maxitems, check_at_least)
             except (xapian.NetworkError, xapian.DatabaseError) as exc:
                 raise XapianError(exc)
