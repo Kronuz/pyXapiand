@@ -226,20 +226,20 @@ class CommandServer(StreamServer):
             self.clients.discard(client)
             client.connectionLost(client)
 
-    def close(self, timeout=None):
+    def close(self, max_age=None):
         if self.closed:
-            if timeout is None:
+            if max_age is None:
                 self.log.error("Forcing server shutdown (%s clients)...", len(self.clients))
         else:
-            if timeout is None:
-                timeout = 10
+            if max_age is None:
+                max_age = 10
             self.log.warning("Hitting Ctrl+C again will terminate all running tasks!")
             super(CommandServer, self).close()
 
         now = time.time()
         clean = []
         for client in self.clients:
-            if timeout is None or client._weak or now - client.activity > timeout:
+            if max_age is None or client._weak or now - client.activity > max_age:
                 try:
                     client.client_socket._sock.close()
                 except AttributeError:

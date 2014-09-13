@@ -756,9 +756,9 @@ def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask
 
     log.debug("Waiting for connected clients to disconnect...")
     while True:
-        if xapian_server.close(10):
+        if xapian_server.close(max_age=10):
             break
-        if gevent.wait(timeout=5):
+        if gevent.wait(timeout=3):
             break
 
     # Stop queues:
