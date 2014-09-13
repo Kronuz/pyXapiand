@@ -82,12 +82,15 @@ def command(threaded=False, **kwargs):
             setattr(func, attr, value)
         if threaded:
             @wraps(func)
-            def wrapped(self, command, _sock, *args, **kwargs):
+            def wrapped(self, command, client_socket, *args, **kwargs):
                 current_thread = threading.current_thread()
                 tid = current_thread.name.rsplit('-', 1)[-1]
                 current_thread.name = '%s-%s-%s' % (self.client_id[:14], command.cmd, tid)
 
-                client_socket = socket.socket(_sock=_sock)  # Create a gevent socket from the raw socket
+                # Create a gevent socket for this thread from the other tread's socket
+                # (using the raw underlying socket, '_sock'):
+                client_socket = socket.socket(_sock=client_socket._sock)
+
                 self.client_socket = client_socket
                 self.socket_file = client_socket.makefile()
                 try:
@@ -166,7 +169,7 @@ class ClientReceiver(object):
             commands_pool = self.server.pool
             pool_size = self.server.pool_size
             pool_size_warning = self.server.pool_size_warning
-            commands_pool.spawn(func, command, self.client_socket._sock, line, command)
+            commands_pool.spawn(func, command, self.client_socket, line, command)
             pool_used = len(commands_pool)
             if not (pool_size_warning - pool_used) % 10:
                 self.log.warning("Commands pool is close to be full (%s/%s)", pool_used, pool_size)
