@@ -469,18 +469,13 @@ def xapian_reopen(database, data='.', log=logging):
     return database
 
 
-def xapian_index(database, db, document, commit=False, data='.', log=logging):
-    subdatabases = database._subdatabases
-
-    db = build_url(*parse_url(db.strip()))
-    subdatabase, _ = _xapian_subdatabase(subdatabases, db, True, False, data, log)
-    if not subdatabase:
-        log.error("Database is None (db:%s)", db)
-        return
-
+def xapian_index(database, document, commit=False, data='.', log=logging):
     document_id, document_values, document_terms, document_texts, document_data, default_language, default_spelling, default_positions = document
 
     document = xapian.Document()
+
+    if document_data:
+        document.set_data(document_data)
 
     for name, value in (document_values or {}).items():
         name = name.strip()
@@ -539,7 +534,7 @@ def xapian_index(database, db, document, commit=False, data='.', log=logging):
         spelling = default_spelling if spelling is None else spelling
 
         term_generator = xapian.TermGenerator()
-        term_generator.set_database(subdatabase)
+        term_generator.set_database(database)
         term_generator.set_document(document)
         if language:
             term_generator.set_stemmer(xapian.Stem(language))
@@ -551,46 +546,58 @@ def xapian_index(database, db, document, commit=False, data='.', log=logging):
             term_generator.set_flags(xapian.TermGenerator.FLAG_SPELLING)
         index_text(normalize(text), weight, prefix)
 
-    if document_data:
-        document.set_data(document_data)
+    return xapian_replace(database, document_id, document)
 
+
+def xapian_replace(database, document_id, document, commit=False, data='.', log=logging):
     try:
-        docid = subdatabase.replace_document(document_id, document)
+        docid = database.replace_document(document_id, document)
     except xapian.InvalidArgumentError as exc:
         log.error("%s", exc)
-
+    except (xapian.NetworkError, xapian.DatabaseError):
+        _database = xapian_reopen(database, data=data, log=log)
+        if database != _database:
+            database = _database
+        try:
+            docid = database.replace_document(document_id, document)
+        except xapian.InvalidArgumentError as exc:
+            log.error("%s", exc)
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            raise XapianError(exc)
     if commit:
-        subdatabase.commit()
+        database = xapian_commit(database, data=data, log=log)
+    return database, docid
 
-    return docid
 
-
-def xapian_delete(database, db, document_id, commit=False, data='.', log=logging):
-    subdatabases = database._subdatabases
-
-    db = build_url(*parse_url(db))
-    subdatabase, _ = _xapian_subdatabase(subdatabases, db, True, False, data=data, log=log)
-    if not subdatabase:
-        log.error("Database is None (db:%s)", db)
-        return
-
-    subdatabase.delete_document(document_id)
-
+def xapian_delete(database, document_id, commit=False, data='.', log=logging):
+    try:
+        database.delete_document(document_id)
+    except (xapian.NetworkError, xapian.DatabaseError):
+        _database = xapian_reopen(database, data=data, log=log)
+        if database != _database:
+            database = _database
+        try:
+            database.delete_document(document_id)
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            raise XapianError(exc)
     if commit:
-        subdatabase.commit()
+        database = xapian_commit(database, data=data, log=log)
+    return database
 
 
-def xapian_commit(database, db, data='.', log=logging):
-    subdatabases = database._subdatabases
-
-    db = build_url(*parse_url(db))
-    subdatabase, _ = _xapian_subdatabase(subdatabases, db, True, False, data=data, log=log)
-    if not subdatabase:
-        log.error("Subdatabase is None: %s", db)
-        return
-
-    subdatabase.commit()
-    log.debug("Commit executed: %s", db)
+def xapian_commit(database, data='.', log=logging):
+    try:
+        database.commit()
+    except (xapian.NetworkError, xapian.DatabaseError):
+        _database = xapian_reopen(database, data=data, log=log)
+        if database != _database:
+            database = _database
+        try:
+            database.commit()
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            raise XapianError(exc)
+    log.debug("Commit executed: %s", database._db)
+    return database
 
 
 def xapian_cleanup(databases_pool, timeout, data='.', log=logging):
