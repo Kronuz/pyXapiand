@@ -376,7 +376,7 @@ class TcpPool(CleanablePool):
 
     def release(self, port):
         with self.lock:
-            self.used.remove(port)
+            self.used.discard(port)
             self.unused.append(port)
 
 
