@@ -243,6 +243,7 @@ def _xapian_spawner(db, parse, data='.', log=logging):
     scheme, hostname, port, username, password, path, query, query_dict = parse
     address = ('0.0.0.0', tcpservers.acquire())
     process = _xapian_spawn(address, path, data=data, log=log)
+    # if address[1] == 8900: address = (address[0], 8990)  # port forwarder enabled
     server = TcpDatabase(db, process, address)
     return server
 
