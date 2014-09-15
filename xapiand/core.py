@@ -45,7 +45,7 @@ def find_terms(value, field=None):
 def expand_terms(value, field=None, connector=' AND '):
     all_terms = {}
     for term, term_field, terms in find_terms(value, None):
-        if term_field.lower() == term_field:
+        if term_field is None or term_field.lower() == term_field:
             all_terms.setdefault((term_field, terms), []).append(term)
     replacements = []
     for (term_field, terms), terms_list in all_terms.items():
