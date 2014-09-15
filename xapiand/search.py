@@ -45,6 +45,8 @@ class Search(object):
         queryparser = xapian.QueryParser()
         queryparser.set_database(self.database)
 
+        query = None
+
         prefixes = set()
 
         def add_prefixes(string):
