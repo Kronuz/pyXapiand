@@ -45,8 +45,6 @@ class Search(object):
         queryparser = xapian.QueryParser()
         queryparser.set_database(self.database)
 
-        query = None
-
         prefixes = set()
 
         def add_prefixes(string):
@@ -66,49 +64,44 @@ class Search(object):
                 search = [search]
             search = " AND ".join("(%s)" % s for s in search if s)
         if search and search != '(*)':
+            search = normalize(search).encode('utf-8')
+
+            ranges = self.search.get('ranges')
+            if ranges:
+                _ranges = set()
+                for field, begin, end in ranges:
+                    field = field.encode('utf-8')
+                    if field not in _ranges:
+                        slot = get_slot(field)
+                        vrp = xapian.StringValueRangeProcessor(slot, field)
+                        queryparser.add_valuerangeprocessor(vrp)
+                        _ranges.add(field)
+                    if begin is None:
+                        begin = b''
+                    if end is None:
+                        end = b''
+                    rng1 = b'(%s:%s..%s)' % (field, begin, end)
+                    rng2 = b'(%s:%s..%s)' % (field, serialise_value(begin)[0], serialise_value(end)[0])
+                    if rng1 == rng2:
+                        _search = search
+                        if rng1 in search:
+                            search = None
+                    else:
+                        _search = search.replace(rng1, rng2)
+                    if search != _search:
+                        search = _search
+                    else:
+                        search += b' AND %s' % rng2
+
+            search = expand_terms(search)
+            add_prefixes(search)
+            flags = xapian.QueryParser.FLAG_DEFAULT | xapian.QueryParser.FLAG_WILDCARD | xapian.QueryParser.FLAG_PURE_NOT
             try:
-                query = xapian.Query.unserialise(search)
-            except xapian.InvalidArgumentError:
-                pass
-            if not query:
-                search = normalize(search).encode('utf-8')
-
-                ranges = self.search.get('ranges')
-                if ranges:
-                    _ranges = set()
-                    for field, begin, end in ranges:
-                        field = field.encode('utf-8')
-                        if field not in _ranges:
-                            slot = get_slot(field)
-                            vrp = xapian.StringValueRangeProcessor(slot, field)
-                            queryparser.add_valuerangeprocessor(vrp)
-                            _ranges.add(field)
-                        if begin is None:
-                            begin = b''
-                        if end is None:
-                            end = b''
-                        rng1 = b'(%s:%s..%s)' % (field, begin, end)
-                        rng2 = b'(%s:%s..%s)' % (field, serialise_value(begin)[0], serialise_value(end)[0])
-                        if rng1 == rng2:
-                            _search = search
-                            if rng1 in search:
-                                search = None
-                        else:
-                            _search = search.replace(rng1, rng2)
-                        if search != _search:
-                            search = _search
-                        else:
-                            search += b' AND %s' % rng2
-
-                search = expand_terms(search)
-                add_prefixes(search)
-                flags = xapian.QueryParser.FLAG_DEFAULT | xapian.QueryParser.FLAG_WILDCARD | xapian.QueryParser.FLAG_PURE_NOT
-                try:
-                    query = queryparser.parse_query(search, flags)
-                except (xapian.NetworkError, xapian.DatabaseModifiedError):
-                    self.database = xapian_reopen(self.database, data=self.data, log=self.log)
-                    queryparser.set_database(self.database)
-                    query = queryparser.parse_query(search, flags)
+                query = queryparser.parse_query(search, flags)
+            except (xapian.NetworkError, xapian.DatabaseModifiedError):
+                self.database = xapian_reopen(self.database, data=self.data, log=self.log)
+                queryparser.set_database(self.database)
+                query = queryparser.parse_query(search, flags)
 
         partials = self.search.get('partials')
         if partials:
