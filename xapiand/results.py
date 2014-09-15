@@ -12,7 +12,7 @@ class XapianResults(object):
 
         facets = []
         for result in self.results:
-            if 'data' in result:
+            if 'docid' in result:
                 self._first_result = result
                 break
             elif 'facet' in result:
