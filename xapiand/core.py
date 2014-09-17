@@ -33,6 +33,14 @@ KEY_RE = re.compile(r'[_a-zA-Z][_a-zA-Z0-9]*')
 PREFIX_RE = re.compile(r'(?:([_a-zA-Z][_a-zA-Z0-9]*):)?("[\w.]+"|[\w.]+)')
 TERM_SPLIT_RE = re.compile(r'\W')
 
+XAPIAN_PREFER_BRASS = True
+XAPIAN_TCPSRV = 'xapian-tcpsrv-1.3'
+XAPIAN_TCPSRV_ENV = os.environ.copy()
+if XAPIAN_PREFER_BRASS:
+    XAPIAN_TCPSRV_ENV['XAPIAN_PREFER_BRASS'] = '1'
+elif 'XAPIAN_PREFER_BRASS' in XAPIAN_TCPSRV_ENV:
+    del XAPIAN_TCPSRV_ENV['XAPIAN_PREFER_BRASS']
+
 
 def find_terms(value, field=None):
     for term_field, terms in PREFIX_RE.findall(value):
@@ -226,10 +234,10 @@ def _xapian_database(endpoints, writable, create, data='.', log=logging):
 
 
 def _xapian_spawn(address, path, data='.', log=logging):
-    args = ['xapian-tcpsrv', '--interface=%s' % address[0], '--port=%s' % address[1], '--writable', '--quiet', path]
+    args = [XAPIAN_TCPSRV, '--interface=%s' % address[0], '--port=%s' % address[1], '--timeout=0', '--writable', '--quiet', path]
     FNULL = open(os.devnull, 'w')
     try:
-        process = subprocess.Popen(args, stdout=FNULL, stderr=subprocess.STDOUT)
+        process = subprocess.Popen(args, stdout=FNULL, stderr=subprocess.STDOUT, env=XAPIAN_TCPSRV_ENV)
         log.info("Spawned xapian TCP server for \"%s\": %s:%s (pid:%s)", path, address[0], address[1], process.pid)
         return process
     except Exception as exc:
