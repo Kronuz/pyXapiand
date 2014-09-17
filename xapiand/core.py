@@ -244,7 +244,7 @@ def _xapian_spawn(address, path, data='.', log=logging):
         log.error("Can't exec %r: %s", ' '.join(args), exc)
         raise IOError("Cannot spawn xapian TCP server process")
     finally:
-        time.sleep(0.1)
+        gevent.sleep(0.1)
 
 
 def _xapian_spawner(db, parse, data='.', log=logging):
