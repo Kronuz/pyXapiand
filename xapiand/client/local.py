@@ -189,7 +189,8 @@ class Xapian(object):
 
     def _delete(self, id, commit):
         self._check_db()
-        with xapian_database(self.databases_pool, self.active_endpoints, writable=True, data=self.data, log=self.log) as database:
+        reopen, self._do_reopen = self._do_reopen, False
+        with xapian_database(self.databases_pool, self.active_endpoints, writable=True, create=self._do_create, reopen=reopen, data=self.data, log=self.log) as database:
             xapian_delete(database, commit=commit, data=self.data, log=self.log)
 
     def delete(self, id):
@@ -207,7 +208,8 @@ class Xapian(object):
             endpoints = self.active_endpoints
         if not endpoints:
             self._check_db()
-        with xapian_database(self.databases_pool, endpoints, writable=True, data=self.data, log=self.log) as database:
+        reopen, self._do_reopen = self._do_reopen, False
+        with xapian_database(self.databases_pool, endpoints, writable=True, create=self._do_create, reopen=reopen, data=self.data, log=self.log) as database:
             xapian_index(database, document, commit=commit, data=self.data, log=self.log)
 
     def index(self, obj=None, **kwargs):
@@ -219,5 +221,6 @@ class Xapian(object):
 
     def commit(self):
         self._check_db()
-        with xapian_database(self.databases_pool, self.active_endpoints, writable=True, data=self.data, log=self.log) as database:
+        reopen, self._do_reopen = self._do_reopen, False
+        with xapian_database(self.databases_pool, self.active_endpoints, writable=True, create=self._do_create, reopen=reopen, data=self.data, log=self.log) as database:
             xapian_commit(database, data=self.data, log=self.log)
