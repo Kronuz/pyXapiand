@@ -79,7 +79,10 @@ def get_slot(name):
         _name = name.lower()
         if _name != name:
             _name = name.upper()
-        return int(md5(_name).hexdigest(), 16) & 0xffffffff
+        slot = int(md5(_name).hexdigest(), 16) & 0xffffffff
+        if slot == 0xffffffff:
+            slot = 0xfffffffe  # max slot is 0xfffffffe
+        return slot
 
 
 def _spawn_tcpservers(endpoints, data='.', log=logging):
