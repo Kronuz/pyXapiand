@@ -540,7 +540,7 @@ def xapian_index(database, document, commit=False, data='.', log=logging):
                 term = terms
             for term in serialise_value(term):
                 if term:
-                    if boolean:
+                    if not boolean:
                         term = term.lower()
                     if position is None:
                         document.add_term(prefixed(term, term_prefix), weight)
@@ -574,7 +574,7 @@ def xapian_index(database, document, commit=False, data='.', log=logging):
             index_text = term_generator.index_text_without_positions
         if spelling:
             term_generator.set_flags(xapian.TermGenerator.FLAG_SPELLING)
-        index_text(normalize(text), weight, prefix)
+        index_text(normalize(text), weight, prefix.upper())
 
     return xapian_replace(database, document_id, document)
 
