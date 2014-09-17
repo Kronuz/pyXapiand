@@ -12,6 +12,8 @@ from ..results import XapianResults
 
 class Xapian(object):
     def __init__(self, *args, **kwargs):
+        self._do_create = False
+        self._do_reopen = False
         self.databases_pool = DatabasesPool()
         self.active_endpoints = None
         self.data = kwargs.pop('data', '.')
@@ -29,8 +31,7 @@ class Xapian(object):
 
     def _reopen(self, create=False, endpoints=None):
         endpoints = endpoints or self.active_endpoints
-        with xapian_database(self.databases_pool, endpoints, writable=False, create=create, reopen=True, data=self.data, log=self.log):
-            self._do_reopen = False
+        self._do_reopen = False
 
     def version(self):
         return version
@@ -43,7 +44,8 @@ class Xapian(object):
         endpoint = endpoint.strip()
         if endpoint:
             endpoints = (endpoint,)
-            self._reopen(create=True, endpoints=endpoints)
+            self._do_create = True
+            self._reopen(endpoints=endpoints)
             self.active_endpoints = endpoints
         else:
             raise XapianError("You must specify a valid endpoint for the database")
@@ -52,7 +54,8 @@ class Xapian(object):
         if endpoints:
             assert isinstance(endpoints, (list, tuple)), "Endpoints must be a tuple"
             endpoints = tuple(endpoints)
-            self._reopen(create=False, endpoints=endpoints)
+            self._do_create = False
+            self._reopen(endpoints=endpoints)
             self.active_endpoints = endpoints
         self._check_db()
 
@@ -60,12 +63,14 @@ class Xapian(object):
         if endpoints:
             assert isinstance(endpoints, (list, tuple)), "Endpoints must be a tuple"
             endpoints = tuple(endpoints)
-            self._reopen(create=True, endpoints=endpoints)
+            self._do_create = True
+            self._reopen(endpoints=endpoints)
             self.active_endpoints = endpoints
         self._check_db()
 
     def _search(self, query, get_matches, get_data, get_terms, get_size):
-        with xapian_database(self.databases_pool, self.active_endpoints, writable=False, data=self.data, log=self.log) as database:
+        reopen, self._do_reopen = self._do_reopen, False
+        with xapian_database(self.databases_pool, self.active_endpoints, writable=False, create=self._do_create, reopen=reopen, data=self.data, log=self.log) as database:
             search = Search(
                 database,
                 query,
@@ -177,15 +182,15 @@ class Xapian(object):
             size = search.estimated
             return size
         else:
-            with xapian_database(self.databases_pool, self.active_endpoints, writable=False, data=self.data, log=self.log) as database:
+            reopen, self._do_reopen = self._do_reopen, False
+            with xapian_database(self.databases_pool, self.active_endpoints, writable=False, create=self._do_create, reopen=reopen, data=self.data, log=self.log) as database:
                 size = database.get_doccount()
                 return size
 
     def _delete(self, id, commit):
         self._check_db()
         with xapian_database(self.databases_pool, self.active_endpoints, writable=True, data=self.data, log=self.log) as database:
-            for db in self.active_endpoints:
-                xapian_delete(database, db, commit=commit, data=self.data, log=self.log)
+            xapian_delete(database, commit=commit, data=self.data, log=self.log)
 
     def delete(self, id):
         self._delete(id, False)
@@ -202,9 +207,8 @@ class Xapian(object):
             endpoints = self.active_endpoints
         if not endpoints:
             self._check_db()
-        with xapian_database(self.databases_pool, self.active_endpoints, writable=True, data=self.data, log=self.log) as database:
-            for db in endpoints:
-                xapian_index(database, db, document, commit=commit, data=self.data, log=self.log)
+        with xapian_database(self.databases_pool, endpoints, writable=True, data=self.data, log=self.log) as database:
+            xapian_index(database, document, commit=commit, data=self.data, log=self.log)
 
     def index(self, obj=None, **kwargs):
         self._index(obj, False, **kwargs)
@@ -216,5 +220,4 @@ class Xapian(object):
     def commit(self):
         self._check_db()
         with xapian_database(self.databases_pool, self.active_endpoints, writable=True, data=self.data, log=self.log) as database:
-            for db in self.active_endpoints:
-                xapian_commit(database, db, data=self.data, log=self.log)
+            xapian_commit(database, data=self.data, log=self.log)
