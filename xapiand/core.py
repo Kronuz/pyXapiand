@@ -85,6 +85,21 @@ def get_slot(name):
         return slot
 
 
+def get_prefix(name, prefix=''):
+    slot = get_slot(name)
+    return '%s%s:' % (prefix, slot)
+
+
+def prefixed(term, prefix=''):
+    prefix = prefix.upper()
+    prefix1 = prefix and prefix[-1]
+    term0 = term and term[0]
+    if not prefix or prefix1 == ':' or not term0.isupper():
+        return prefix + term
+    else:
+        return prefix + ':' + term
+
+
 def _spawn_tcpservers(endpoints, data='.', log=logging):
     from . import Xapian
 
@@ -499,8 +514,8 @@ def xapian_index(database, document, commit=False, data='.', log=logging):
             log.warning("Ignored document value name (%r)", name)
 
     if isinstance(document_id, basestring):
-        document.add_value(get_slot('id'), document_id)
-        document_id = DOCUMENT_ID_TERM_PREFIX + document_id
+        document.add_value(get_slot('ID'), document_id)
+        document_id = prefixed(document_id, DOCUMENT_ID_TERM_PREFIX)
         document.add_boolean_term(document_id)  # Make sure document_id is also a term (otherwise it doesn't replace an existing document)
 
     for terms in document_terms or ():
@@ -514,21 +529,25 @@ def xapian_index(database, document, commit=False, data='.', log=logging):
         weight = 1 if weight is None else weight
         prefix = '' if prefix is None else prefix
 
-        for term, field, terms in find_terms(terms, None):
-            if field:
-                lower = field.lower() == field
-                term_prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(field))
+        for term, field_name, terms in find_terms(terms, None):
+            if field_name:
+                boolean = not field_name.islower()
+                term_prefix = get_prefix(field_name, DOCUMENT_CUSTOM_TERM_PREFIX)
             else:
-                lower = False
+                boolean = not prefix.islower()
                 term_prefix = prefix
+            if boolean:
+                term = terms
             for term in serialise_value(term):
                 if term:
-                    if lower:
+                    if boolean:
                         term = term.lower()
                     if position is None:
-                        document.add_term(term_prefix + term, weight)
+                        document.add_term(prefixed(term, term_prefix), weight)
                     else:
-                        document.add_posting(term_prefix + term, position, weight)
+                        document.add_posting(prefixed(term, term_prefix), position, weight)
+            if boolean:
+                break
 
     for text in document_texts or ():
         if isinstance(text, (tuple, list)):

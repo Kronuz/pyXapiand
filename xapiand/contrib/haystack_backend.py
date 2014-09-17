@@ -8,7 +8,7 @@ except ImportError:
     import pickle
 
 from xapiand import Xapian
-from xapiand.core import get_slot, expand_terms, DOCUMENT_CUSTOM_TERM_PREFIX
+from xapiand.core import get_prefix, expand_terms, DOCUMENT_CUSTOM_TERM_PREFIX
 from xapiand.serialise import LatLongCoord
 from xapiand.results import XapianResults
 
@@ -21,8 +21,8 @@ from haystack.utils import get_identifier, get_model_ct
 from django.core.exceptions import ImproperlyConfigured
 
 DOCUMENT_CT_FIELD = 'django_ct'
-DOCUMENT_AC_FIELD = 'ac'
 DOCUMENT_TAGS_FIELD = 'tags'
+DOCUMENT_AC_FIELD = 'ac'
 
 
 def consistent_hash(key, num_buckets):
@@ -113,7 +113,18 @@ class XapianSearchBackend(BaseSearchBackend):
         for field in self.schema:
             field_name = field['field_name']
             if field_name in data:
-                prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(field_name))
+                boolean = field_name.lower() != field_name
+
+                prefix = get_prefix(field_name, DOCUMENT_CUSTOM_TERM_PREFIX)
+                ac_prefix = get_prefix(DOCUMENT_AC_FIELD, DOCUMENT_CUSTOM_TERM_PREFIX)
+                tags_prefix = get_prefix(DOCUMENT_TAGS_FIELD, DOCUMENT_CUSTOM_TERM_PREFIX)
+                if boolean:
+                    term_case = lambda t: t
+                else:
+                    term_case = lambda t: t.lower()
+                prefix = term_case(prefix)
+                ac_prefix = term_case(ac_prefix)
+                tags_prefix = term_case(tags_prefix)
 
                 values = data[field_name]
                 if not field['multi_valued']:
@@ -134,11 +145,9 @@ class XapianSearchBackend(BaseSearchBackend):
 
                     if field_type == 'text':
                         if field['mode'] == 'autocomplete':  # mode = content, autocomplete, tagged
-                            term_prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(DOCUMENT_AC_FIELD))
-                            document_terms.append(dict(term=value.lower(), weight=weight, prefix=term_prefix))
+                            document_terms.append(dict(term=value.lower(), weight=weight, prefix=ac_prefix))
                         elif field['mode'] == 'tagged':
-                            term_prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(DOCUMENT_TAGS_FIELD))
-                            document_terms.append(dict(term=value, weight=weight, prefix=term_prefix))
+                            document_terms.append(dict(term=value, weight=weight, prefix=tags_prefix))
                         else:
                             document_texts.append(dict(text=value, weight=weight, prefix=prefix))
 
@@ -147,7 +156,7 @@ class XapianSearchBackend(BaseSearchBackend):
                         NGRAM_MAX_LENGTH = 15
                         terms = _ngram_terms({value: weight}, min_length=NGRAM_MIN_LENGTH, max_length=NGRAM_MAX_LENGTH, split=field_type == 'edge_ngram')
                         for term, weight in terms.items():
-                            document_terms.append(dict(term=term, weight=weight, prefix=prefix))
+                            document_terms.append(dict(term=term_case(term), weight=weight, prefix=prefix))
 
                     elif field_type == 'geo_point':
                         lat, _, lng = value.partition(',')
@@ -156,7 +165,7 @@ class XapianSearchBackend(BaseSearchBackend):
                         document_values[field_name] = value
 
                     elif field_type == 'boolean':
-                        document_terms.append(dict(term=bool(value), weight=weight, prefix=prefix))
+                        document_terms.append(dict(term=1 if value else 0, weight=weight, prefix=prefix))
 
                     elif field_type in ('integer', 'long'):
                         value = int(value)
@@ -177,7 +186,7 @@ class XapianSearchBackend(BaseSearchBackend):
 
         document_data = pickle.dumps((obj._meta.app_label, obj._meta.module_name, obj.pk, data))
 
-        term_prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(DOCUMENT_CT_FIELD))
+        term_prefix = get_prefix(DOCUMENT_CT_FIELD, DOCUMENT_CUSTOM_TERM_PREFIX)
         document_terms.append(dict(term=get_model_ct(obj), weight=0, prefix=term_prefix))
 
         document_id = get_identifier(obj)

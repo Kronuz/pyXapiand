@@ -6,7 +6,7 @@ import logging
 import xapian
 
 from . import json
-from .core import xapian_reopen, get_slot, expand_terms, find_terms, get_document, get_data, get_value, get_termlist, DOCUMENT_CUSTOM_TERM_PREFIX
+from .core import xapian_reopen, get_slot, get_prefix, expand_terms, find_terms, get_document, get_data, get_value, get_termlist, DOCUMENT_CUSTOM_TERM_PREFIX
 from .serialise import normalize, serialise_value
 from .exceptions import XapianError
 
@@ -52,7 +52,7 @@ class Search(object):
         def add_prefixes(string):
             for term, term_field, terms in find_terms(string):
                 if term_field and term_field not in prefixes:
-                    prefix = '%s%s' % (DOCUMENT_CUSTOM_TERM_PREFIX, get_slot(term_field))
+                    prefix = get_prefix(term_field, DOCUMENT_CUSTOM_TERM_PREFIX)
                     if term_field.lower() == term_field:
                         queryparser.add_prefix(term_field, prefix)
                     else:
@@ -222,7 +222,7 @@ class Search(object):
 
         if self.distinct:
             if self.distinct is True:
-                field = 'id'
+                field = 'ID'
             else:
                 field = self.distinct
             enquire.set_collapse_key(get_slot(field))
@@ -286,7 +286,7 @@ class Search(object):
             self.database, document = get_document(self.database, docid, data=self.data, log=self.log)
 
             self.dead or 'alive'  # Raises DeadException when needed
-            self.database, id = get_value(self.database, document, get_slot('id'), data=self.data, log=self.log)
+            self.database, id = get_value(self.database, document, get_slot('ID'), data=self.data, log=self.log)
 
             produced += 1
             result = {
