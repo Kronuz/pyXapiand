@@ -101,7 +101,7 @@ class PortForwarder(StreamServer):
         try:
             server_socket = self.create_connection()
         except IOError as ex:
-            self.log.error("%s:%s failed to connect to %s:%s: %s", address[0], address[1], self.server_socket[0], self.server_socket[1], ex)
+            self.log.error("%s:%s failed to connect to %s:%s: %s", address[0], address[1], server_socket[0], server_socket[1], ex)
             return
 
         gevent.spawn(self.forward, client_socket, server_socket, False)
