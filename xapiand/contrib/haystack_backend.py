@@ -13,14 +13,13 @@ from xapiand.serialise import LatLongCoord
 from xapiand.results import XapianResults
 
 from haystack import connections
-from haystack.constants import ID, DEFAULT_ALIAS
+from haystack.constants import ID, DJANGO_CT, DJANGO_ID
 from haystack.backends import BaseEngine, BaseSearchBackend, BaseSearchQuery, log_query
 from haystack.models import SearchResult
 from haystack.utils import get_identifier, get_model_ct
 
 from django.core.exceptions import ImproperlyConfigured
 
-DOCUMENT_CT_FIELD = 'django_ct'
 DOCUMENT_TAGS_FIELD = 'tags'
 DOCUMENT_AC_FIELD = 'ac'
 
@@ -113,9 +112,12 @@ class XapianSearchBackend(BaseSearchBackend):
         for field in self.schema:
             field_name = field['field_name']
             if field_name in data:
-                boolean = field_name.lower() != field_name
-
-                prefix = get_prefix(field_name, DOCUMENT_CUSTOM_TERM_PREFIX)
+                if field_name in (ID, DJANGO_CT, DJANGO_ID):
+                    boolean = True
+                    prefix = get_prefix(field_name.upper(), DOCUMENT_CUSTOM_TERM_PREFIX)
+                else:
+                    boolean = field_name.lower() != field_name
+                    prefix = get_prefix(field_name, DOCUMENT_CUSTOM_TERM_PREFIX)
                 ac_prefix = get_prefix(DOCUMENT_AC_FIELD, DOCUMENT_CUSTOM_TERM_PREFIX)
                 tags_prefix = get_prefix(DOCUMENT_TAGS_FIELD, DOCUMENT_CUSTOM_TERM_PREFIX)
                 if boolean:
@@ -186,7 +188,7 @@ class XapianSearchBackend(BaseSearchBackend):
 
         document_data = pickle.dumps((obj._meta.app_label, obj._meta.module_name, obj.pk, data))
 
-        term_prefix = get_prefix(DOCUMENT_CT_FIELD, DOCUMENT_CUSTOM_TERM_PREFIX)
+        term_prefix = get_prefix(DJANGO_CT.upper(), DOCUMENT_CUSTOM_TERM_PREFIX)
         document_terms.append(dict(term=get_model_ct(obj), weight=0, prefix=term_prefix))
 
         document_id = get_identifier(obj)
@@ -244,9 +246,13 @@ class XapianSearchBackend(BaseSearchBackend):
         if models:
             if not terms:
                 terms = set()
-            terms.update('%s:%s.%s' % (DOCUMENT_CT_FIELD, model._meta.app_label, model._meta.module_name) for model in models)
+            terms.update('%s:%s.%s' % (DJANGO_CT.upper(), model._meta.app_label, model._meta.module_name) for model in models)
 
-        query_string = query_string.replace('### AND ###', '').replace('###', '').replace('()', '')
+        _query_string = None
+        while _query_string != query_string:
+            _query_string = query_string
+            query_string = _query_string.replace('### AND ###', '###').replace('(###)', '###')
+        query_string = query_string.replace('###', '')
         results = self.xapian.search(
             query_string,
             offset=offset,
@@ -344,12 +350,6 @@ class XapianSearchBackend(BaseSearchBackend):
 
 
 class XapianSearchQuery(BaseSearchQuery):
-    def __init__(self, using=DEFAULT_ALIAS):
-        super(XapianSearchQuery, self).__init__(using=using)
-        self.partials = []
-        self.terms = set()
-        self.ranges = set()
-
     def build_params(self, spelling_query=None):
         kwargs = super(XapianSearchQuery, self).build_params(spelling_query=spelling_query)
         if self.terms:
@@ -359,6 +359,12 @@ class XapianSearchQuery(BaseSearchQuery):
         if self.ranges:
             kwargs['ranges'] = self.ranges
         return kwargs
+
+    def build_query(self):
+        self.partials = []
+        self.terms = set()
+        self.ranges = set()
+        return super(XapianSearchQuery, self).build_query()
 
     def build_query_fragment(self, field, filter_type, value):
         if filter_type == 'contains':
