@@ -1,8 +1,9 @@
 from __future__ import unicode_literals, absolute_import
 
 import time
-import threading
 import logging
+import weakref
+import threading
 from hashlib import md5
 
 from functools import wraps
@@ -114,7 +115,7 @@ class ClientReceiver(object):
     def __init__(self, server, client_socket, address, log=logging,
                  encoding='utf-8', encoding_errors='strict'):
         self.log = log
-        self.server = server
+        self._server = weakref.ref(server)
         self.address = address
         self.local = threading.local()
         self.client_socket = client_socket
@@ -129,6 +130,10 @@ class ClientReceiver(object):
         current_thread = threading.current_thread()
         tid = current_thread.name.rsplit('-', 1)[-1]
         current_thread.name = '%s-%s' % (self.client_id[:14], tid)
+
+    @property
+    def server(self):
+        return self._server()
 
     def close(self):
         self.closed = True
@@ -205,18 +210,18 @@ class CommandServer(StreamServer):
     pool_size = 10
 
     def __init__(self, *args, **kwargs):
-        log = kwargs.pop('log', logging)
+        self.log = kwargs.pop('log', logging)
+        self.pool_size = kwargs.pop('pool_size', self.pool_size)
         super(CommandServer, self).__init__(*args, **kwargs)
-        self.log = log
         self.pool_size_warning = int(self.pool_size / 3.0 * 2.0)
         self.pool = ThreadPool(self.pool_size)
         self.clients = set()
 
-    def buildClient(self, client_socket, address):
+    def build_client(self, client_socket, address):
         return self.receiver_class(self, client_socket, address, log=self.log)
 
     def handle(self, client_socket, address):
-        client = self.buildClient(client_socket, address)
+        client = self.build_client(client_socket, address)
 
         self.clients.add(client)
         client.connectionMade(client)

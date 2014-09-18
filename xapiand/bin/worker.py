@@ -41,7 +41,7 @@ option_list = (
         help="Port for the sever, e.g. 0.0.0.0:8890 (default)"),
     make_option("--detach", action='store_true', dest="detach", default=False,
         help="Detach process"),
-    make_option("--queue", action='store', dest='queue', default='memory',
+    make_option("--queue", action='store', dest='queue_type', default='memory',
         type='choice', choices=['memory', 'file', 'redis'],
         help="Queue type; memory=Memory queue (default), file=File based queue (persistent)"),
     make_option("-t", "--commit_timeout", action='store', dest='commit_timeout', default=1, type='int'),

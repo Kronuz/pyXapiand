@@ -1,82 +1,36 @@
 from __future__ import unicode_literals, absolute_import
 
-import gevent
-from gevent import queue
-from gevent.lock import Semaphore
-from gevent.threadpool import ThreadPool
-
 import os
-import sys
 import time
-import Queue
-import signal
-import threading
 from hashlib import md5
 
 from .. import version, json
 from ..exceptions import InvalidIndexError, XapianError
-from ..core import DatabasesPool, xapian_cleanup, xapian_spawn, DATABASE_MAX_LIFE
-from ..platforms import create_pidlock
+from ..core import xapian_spawn
 from ..utils import parse_url, build_url, format_time
 from ..parser import index_parser, search_parser
 from ..search import Search
 
 from .base import CommandReceiver, CommandServer, command
-from .logging import ColoredStreamHandler
-try:
-    from .queue.redis import RedisQueue
-except ImportError:
-    RedisQueue = None
-from .queue.fqueue import FileQueue
-from .queue.memory import MemoryQueue
 
-
-DEFAULT_QUEUE = MemoryQueue
-AVAILABLE_QUEUES = {
-    'file': FileQueue,
-    'redis': RedisQueue or DEFAULT_QUEUE,
-    'memory': MemoryQueue,
-    'persistent': MemoryQueue,
-    'default': DEFAULT_QUEUE,
-}
-
-import logging
-
-LOG_FORMAT = "[%(asctime)s: %(levelname)s/%(processName)s:%(threadName)s] %(message)s"
-
-STOPPED = 0
-COMMIT_SLOTS = 10
-COMMIT_TIMEOUT = 1
-WRITERS_POOL_SIZE = 10
-COMMANDS_POOL_SIZE = 20
-
-WRITERS_FILE = 'Xapian-Writers.db'
-QUEUE_WRITER_MAIN = 'Xapian-Worker'
 QUEUE_WRITER_THREAD = 'Writer-%s'
 
-MAIN_QUEUE = queue.Queue()
-QUEUES = {}
-PQueue = None
 
-
-class Obj(object):
-    def __init__(self, **kwargs):
-        self.__dict__ = kwargs
+def database_name(db):
+    return QUEUE_WRITER_THREAD % md5(db).hexdigest()
 
 
 class XapiandReceiver(CommandReceiver):
     welcome = "# Welcome to Xapiand! Type QUIT to exit, HELP for help."
 
     def __init__(self, *args, **kwargs):
-        data = kwargs.pop('data', '.')
+        self.data = kwargs.pop('data', '.')
         super(XapiandReceiver, self).__init__(*args, **kwargs)
         self._do_create = False
         self._do_reopen = False
         self._do_init = set()
         self._inited = set()
-        self.databases_pool = self.server.databases_pool
         self.active_endpoints = None
-        self.data = data
 
     def dispatch(self, func, line, command):
         if getattr(func, 'db', False) and not self.active_endpoints:
@@ -199,7 +153,7 @@ class XapiandReceiver(CommandReceiver):
     def _search(self, query, get_matches, get_data, get_terms, get_size, dead, counting=False):
         try:
             reopen, self._do_reopen = self._do_reopen, False
-            with self.databases_pool.database(self.active_endpoints, writable=False, create=self._do_create, reopen=reopen) as database:
+            with self.server.databases_pool.database(self.active_endpoints, writable=False, create=self._do_create, reopen=reopen) as database:
                 start = time.time()
 
                 search = Search(
@@ -294,7 +248,7 @@ class XapiandReceiver(CommandReceiver):
             return self._search(query, get_matches=False, get_data=False, get_terms=False, get_size=True, dead=False, counting=True)  # dead is False because command it's not threaded
         try:
             reopen, self._do_reopen = self._do_reopen, False
-            with self.databases_pool.database(self.active_endpoints, writable=False, create=self._do_create, reopen=reopen) as database:
+            with self.server.databases_pool.database(self.active_endpoints, writable=False, create=self._do_create, reopen=reopen) as database:
                 size = database.get_doccount()
                 self.sendLine(">> OK: %s documents found in %s" % (size, format_time(time.time() - start)))
                 return size
@@ -315,13 +269,18 @@ class XapiandReceiver(CommandReceiver):
         while self._do_init:
             endpoints = self._do_init.pop()
             if endpoints not in self._inited:
-                _xapian_init(endpoints, queue=MAIN_QUEUE, data=self.data, log=self.log)
+                queue = self.server.main_queue
+                queue.put(('INIT', endpoints, ()))
                 self._inited.add(endpoints)
 
-    def _delete(self, line, commit):
+    def _delete(self, document_id, commit):
         self._reopen()
         for db in self.active_endpoints:
-            _xapian_delete(db, line, commit=commit, data=self.data, log=self.log)
+            db = build_url(*parse_url(db.strip()))
+            name = database_name(db)
+            queue_name = os.path.join(self.data, name)
+            queue = self.server.get_queue(queue_name)
+            queue.put(('CDELETE' if commit else 'DELETE', (db,), (document_id,)))
         self.sendLine(">> OK")
         self._init()
 
@@ -356,7 +315,11 @@ class XapiandReceiver(CommandReceiver):
                 self.sendLine(">> ERR: %s" % "You must connect to a database first")
                 return
             for db in endpoints:
-                _xapian_index(db, document, commit=commit, data=self.data, log=self.log)
+                db = build_url(*parse_url(db.strip()))
+                name = database_name(db)
+                queue_name = os.path.join(self.data, name)
+                queue = self.server.get_queue(queue_name)
+                queue.put(('CINDEX' if commit else 'INDEX', (db,), (document,)))
             self.sendLine(">> OK")
             self._init()
         else:
@@ -390,7 +353,11 @@ class XapiandReceiver(CommandReceiver):
         """
         self._reopen()
         for db in self.active_endpoints:
-            _xapian_commit(db, data=self.data, log=self.log)
+            db = build_url(*parse_url(db.strip()))
+            name = database_name(db)
+            queue_name = os.path.join(self.data, name)
+            queue = self.server.get_queue(queue_name)
+            queue.put(('COMMIT', (db,), ()), data=self.data, log=self.log)
         self.sendLine(">> OK")
         self._init()
 
@@ -419,7 +386,7 @@ class XapiandReceiver(CommandReceiver):
         if databases:
             for (writable, endpoints), pool_queue in databases:
                 if writable:
-                    lines.append("    Writer %s, pool: %s/%s, idle: ~%s" % (_database_name(endpoints[0]), len(pool_queue.used), len(pool_queue.used) + len(pool_queue.unused), format_time(now - pool_queue.time)))
+                    lines.append("    Writer %s, pool: %s/%s, idle: ~%s" % (database_name(endpoints[0]), len(pool_queue.used), len(pool_queue.used) + len(pool_queue.unused), format_time(now - pool_queue.time)))
                     for endpoint in endpoints:
                         lines.append("        %s" % endpoint)
             for (writable, endpoints), pool_queue in databases:
@@ -434,344 +401,21 @@ class XapiandReceiver(CommandReceiver):
 
 
 class XapiandServer(CommandServer):
-    pool_size = COMMANDS_POOL_SIZE
     receiver_class = XapiandReceiver
 
     def __init__(self, *args, **kwargs):
-        self.data = kwargs.pop('data', '.')
+        self.queues = {}
         self.databases_pool = kwargs.pop('databases_pool')
+        self.main_queue = kwargs.pop('main_queue')
+        self.queue_class = kwargs.pop('queue_class')
+        self.data = kwargs.pop('data', '.')
         super(XapiandServer, self).__init__(*args, **kwargs)
         address = self.address[0] or '0.0.0.0'
         port = self.address[1] or 8890
         self.log.info("Xapiand Server Listening to %s:%s", address, port)
 
-    def buildClient(self, client_socket, address):
+    def get_queue(self, name):
+        return self.queues.setdefault(name, self.queue_class(name=name, log=self.log))
+
+    def build_client(self, client_socket, address):
         return self.receiver_class(self, client_socket, address, data=self.data, log=self.log)
-
-
-def get_queue(name, log=logging):
-    return QUEUES.setdefault(name, PQueue(name=name, log=log))
-
-
-def _database_name(db):
-    return QUEUE_WRITER_THREAD % md5(db).hexdigest()
-
-
-def _enqueue(msg, queue, data='.', log=logging):
-    if not STOPPED:
-        try:
-            queue.put(msg)
-        except Queue.Full:
-            log.error("Cannot send command to queue! (3)")
-
-
-def _xapian_init(endpoints, queue=None, data='.', log=logging):
-    if not queue:
-        queue = get_queue(name=QUEUE_WRITER_MAIN, log=log)
-    _enqueue(('INIT', endpoints, ()), queue=queue, data=data, log=log)
-
-
-def _xapian_commit(db, data='.', log=logging):
-    db = build_url(*parse_url(db.strip()))
-    name = _database_name(db)
-    queue = get_queue(name=os.path.join(data, name), log=log)
-    _enqueue(('COMMIT', (db,), ()), queue=queue, data=data, log=log)
-
-
-def _xapian_index(db, document, commit=False, data='.', log=logging):
-    db = build_url(*parse_url(db.strip()))
-    name = _database_name(db)
-    queue = get_queue(name=os.path.join(data, name), log=log)
-    _enqueue(('CINDEX' if commit else 'INDEX', (db,), (document,)), queue=queue, data=data, log=log)
-
-
-def _xapian_delete(db, document_id, commit=False, data='.', log=logging):
-    db = build_url(*parse_url(db.strip()))
-    name = _database_name(db)
-    queue = get_queue(name=name, log=log)
-    _enqueue(('CDELETE' if commit else 'DELETE', (db,), (document_id,)), queue=queue, data=data, log=log)
-
-
-def _database_command(database, cmd, args, data='.', log=logging):
-    unknown = False
-    start = time.time()
-    if cmd in ('INDEX', 'CINDEX'):
-        arg = args[0][0]
-    elif cmd in ('DELETE', 'CDELETE'):
-        arg = args[0]
-    else:
-        arg = ''
-    docid = None
-    try:
-        if cmd == 'INDEX':
-            docid = database.index(*args)
-        elif cmd == 'CINDEX':
-            docid = database.index(*args, commit=True)
-        elif cmd == 'DELETE':
-            database.delete(database, *args)
-        elif cmd == 'CDELETE':
-            database.delete(database, *args, commit=True)
-        elif cmd == 'COMMIT':
-            database.commit(*args)
-        else:
-            unknown = True
-    except Exception as exc:
-        log.exception("%s", exc)
-        raise
-    duration = time.time() - start
-    docid = ' -> %s' % docid if docid else ''
-    log.debug("Executed %s %s(%s)%s (%s) ~%s", "unknown command" if unknown else "command", cmd, arg, docid, database, format_time(duration))
-
-
-def _database_commit(database, to_commit, commit_lock, timeouts, force=False, data='.', log=logging):
-    if not to_commit:
-        return
-
-    now = time.time()
-
-    expires = now - timeouts.commit
-    expires_delayed = now - timeouts.delayed
-    expires_max = now - timeouts.maximum
-
-    for db, (dt0, dt1, dt2) in list(to_commit.items()):
-        do_commit = locked = force and commit_lock.acquire()  # If forcing, wait for the lock
-        if not do_commit:
-            do_commit = dt0 <= expires_max
-            if do_commit:
-                log.warning("Commit maximum expiration reached, commit forced! (%s)", db)
-        if not do_commit:
-            if dt1 <= expires_delayed or dt2 <= expires:
-                do_commit = locked = commit_lock.acquire(False)
-                if not locked:
-                    log.warning("Out of commit slots, commit delayed! (%s)", db)
-        if do_commit:
-            try:
-                _database_command(database, 'COMMIT', (), data=data, log=log)
-                del to_commit[db]
-            finally:
-                if locked:
-                    commit_lock.release()
-
-
-def _writer_loop(databases, databases_pool, db, tq, commit_lock, timeouts, data, log):
-    global STOPPED
-    name = _database_name(db)
-    to_commit = {}
-
-    current_thread = threading.current_thread()
-    tid = current_thread.name.rsplit('-', 1)[-1]
-    current_thread.name = '%s-%s' % (name[:14], tid)
-
-    start = last = time.time()
-
-    # Create a gevent Queue for this thread from the other tread's Queue
-    # (using the raw underlying deque, 'queue'):
-    queue = type(tq)(tq.maxsize)
-    queue.queue = tq.queue
-
-    # Open the database
-    with databases_pool.database((db,), writable=True, create=True) as database:
-        log.info("New writer %s: %s (%s)", name, db, database.get_uuid())
-        msg = None
-        timeout = timeouts.timeout
-        while not STOPPED:
-            _database_commit(database, to_commit, commit_lock, timeouts, data=data, log=log)
-
-            now = time.time()
-            try:
-                msg = queue.get(True, timeout)
-            except Queue.Empty:
-                if now - last > DATABASE_MAX_LIFE:
-                    log.debug("Writer timeout... stopping!")
-                    break
-                continue
-            if not msg:
-                continue
-            try:
-                cmd, endpoints, args = msg
-            except ValueError:
-                log.error("Wrong command received!")
-                continue
-
-            for _db in endpoints:
-                _db = build_url(*parse_url(_db.strip()))
-                if _db != db:
-                    continue
-
-                last = now
-                _database_command(database, cmd, args, data=data, log=log)
-
-                if cmd in ('INDEX', 'DELETE'):
-                    now = time.time()
-                    if db in to_commit:
-                        to_commit[db] = (to_commit[db][0], to_commit[db][1], now)
-                    else:
-                        to_commit[db] = (now, now, now)
-
-        _database_commit(database, to_commit, commit_lock, timeouts, force=True, data=data, log=log)
-        database.close()
-        databases.pop(db, None)
-
-    log.debug("Writer %s ended! ~ lived for %s", name, format_time(time.time() - start))
-
-
-def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=0,
-        working_directory=None, verbosity=2, commit_slots=None, commit_timeout=None,
-        port=None, queue=None, **options):
-    global PQueue, STOPPED
-
-    current_thread = threading.current_thread()
-    tid = current_thread.name.rsplit('-', 1)[-1]
-    current_thread.name = 'Server-%s' % tid
-
-    if pidfile:
-        create_pidlock(pidfile)
-
-    address, _, port = port.partition(':')
-    if not port:
-        port, address = address, ''
-    port = int(port)
-
-    loglevel = ['ERROR', 'WARNING', 'INFO', 'DEBUG'][3 if verbosity == 'v' else int(verbosity)]
-
-    log = logging.getLogger()
-    log.setLevel(loglevel)
-    if len(log.handlers) < 1:
-        formatter = logging.Formatter(LOG_FORMAT)
-        if logfile:
-            outfile = logging.FileHandler(logfile)
-            outfile.setFormatter(formatter)
-            log.addHandler(outfile)
-        if not pidfile:
-            console = ColoredStreamHandler(sys.stderr)
-            console.setFormatter(formatter)
-            log.addHandler(console)
-
-    if not commit_slots:
-        commit_slots = COMMIT_SLOTS
-
-    if commit_timeout is None:
-        commit_timeout = COMMIT_TIMEOUT
-    timeout = min(max(int(round(commit_timeout * 0.3)), 1), 3)
-
-    PQueue = AVAILABLE_QUEUES.get(queue) or AVAILABLE_QUEUES['default']
-    mode = "with multiple threads and %s commit slots using %s" % (commit_slots, PQueue.__name__)
-    log.warning("Starting Xapiand Server v%s %s [%s] (pid:%s)", version, mode, loglevel, os.getpid())
-
-    commit_lock = Semaphore(commit_slots)
-    timeouts = Obj(
-        timeout=timeout,
-        commit=commit_timeout * 1.0,
-        delayed=commit_timeout * 3.0,
-        maximum=commit_timeout * 9.0,
-    )
-
-    databases_pool = DatabasesPool(data=data, log=log)
-    databases = {}
-
-    xapian_server = XapiandServer((address, port), databases_pool=databases_pool, data=data, log=log)
-
-    gevent.signal(signal.SIGTERM, xapian_server.close)
-    gevent.signal(signal.SIGINT, xapian_server.close)
-
-    log.debug("Starting server...")
-    try:
-        xapian_server.start()
-    except Exception as exc:
-        log.error("Cannot start server: %s", exc)
-        sys.exit(-1)
-
-    pq = get_queue(name=QUEUE_WRITER_MAIN, log=log)
-
-    pool_size = WRITERS_POOL_SIZE
-    pool_size_warning = int(pool_size / 3.0 * 2.0)
-    writers_pool = ThreadPool(pool_size)
-
-    def start_writer(db):
-        db = build_url(*parse_url(db.strip()))
-        name = _database_name(db)
-        try:
-            tq = None
-            t, tq = databases[db]
-            if t.ready():
-                raise KeyError
-        except KeyError:
-            tq = tq or get_queue(name=os.path.join(data, name), log=log)
-            pool_used = len(writers_pool)
-            if not (pool_size_warning - pool_used) % 10:
-                log.warning("Writers pool is close to be full (%s/%s)", pool_used, pool_size)
-            elif pool_used == pool_size:
-                log.error("Writers poll is full! (%s/%s)", pool_used, pool_size)
-            t = writers_pool.spawn(_writer_loop, databases, databases_pool, db, tq, commit_lock, timeouts, data, log)
-            databases[db] = (t, tq)
-        return db, name, t, tq
-
-    if PQueue.persistent:
-        # Initialize seen writers:
-        writers_file = os.path.join(data, WRITERS_FILE)
-        with open(writers_file, 'rt') as epfile:
-            for i, db in enumerate(epfile):
-                if i == 0:
-                    log.debug("Initializing writers...")
-                start_writer(db)
-
-    log.info("Waiting for commands...")
-    msg = None
-    timeout = timeouts.timeout
-    while not xapian_server.closed:
-        xapian_cleanup(databases_pool, DATABASE_MAX_LIFE, data=data, log=log)
-        try:
-            msg = MAIN_QUEUE.get(True, timeout)
-        except Queue.Empty:
-            try:
-                msg = pq.get(False)
-            except Queue.Empty:
-                continue
-        if not msg:
-            continue
-        try:
-            cmd, endpoints, args = msg
-        except ValueError:
-            log.error("Wrong command received!")
-            continue
-
-        for db in endpoints:
-            db, name, t, tq = start_writer(db)
-            if cmd != 'INIT':
-                try:
-                    tq.put((cmd, db, args))
-                    log.debug("Command '%s' forwarded to %s", cmd, name)
-                except Queue.Full:
-                    log.error("Cannot send command to queue! (2)")
-
-    log.debug("Waiting for connected clients to disconnect...")
-    while True:
-        if xapian_server.close(max_age=10):
-            break
-        if gevent.wait(timeout=3):
-            break
-
-    # Stop queues:
-    PQueue.STOPPED = STOPPED = time.time()
-    if PQueue.persistent:
-        with open(writers_file, 'wt') as epfile:
-            for db, (t, tq) in databases.items():
-                if not t.ready():
-                    epfile.write("%s\n" % db)
-
-    # Wake up writers:
-    for t, tq in databases.values():
-        try:
-            tq.put(None)  # wake up!
-        except Queue.Full:
-            log.error("Cannot send command to queue! (1)")
-
-    log.debug("Waiting for %s writers...", len(databases))
-    for t, tq in databases.values():
-        t.wait()
-
-    xapian_cleanup(databases_pool, 0, data=data, log=log)
-
-    log.warning("Xapiand Server ended! (pid:%s)", os.getpid())
-
-    gevent.wait()
