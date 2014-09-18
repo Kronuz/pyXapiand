@@ -180,7 +180,7 @@ def _writer_loop(databases, databases_pool, db, tq, commit_lock, timeouts, data,
 
 def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=0,
         working_directory=None, verbosity=2, commit_slots=None, commit_timeout=None,
-        port=None, queue_type=None, **options):
+        listener=None, queue_type=None, **options):
     global STOPPED
 
     current_thread = threading.current_thread()
@@ -190,7 +190,7 @@ def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask
     if pidfile:
         create_pidlock(pidfile)
 
-    address, _, port = port.partition(':')
+    address, _, port = listener.partition(':')
     if not port:
         port, address = address, ''
     port = int(port)
