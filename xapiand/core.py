@@ -268,11 +268,10 @@ def _xapian_spawn(address, path, data='.', log=logging):
 
 def _xapian_spawner(db, parse, data='.', log=logging):
     scheme, hostname, port, username, password, path, query, query_dict = parse
-    address = ('0.0.0.0', tcpservers.acquire())
-    process = _xapian_spawn(address, path, data=data, log=log)
-    # if address[1] == 8900: address = (address[0], 8990)  # port forwarder enabled
-    server = TcpDatabase(db, process, address)
-    return server
+    port = tcpservers.acquire()
+    process = _xapian_spawn(('0.0.0.0', port), path, data=data, log=log)
+    # if port == 8900: port = 8990  # port forwarder enabled
+    return TcpDatabase(db, process, (hostname, port))
 
 
 def xapian_spawn(db, spawner=_xapian_spawner, data='.', log=logging):
