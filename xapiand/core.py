@@ -145,7 +145,7 @@ def _xapian_subdatabase(subdatabases, db, writable, create, data='.', log=loggin
     try:
         return subdatabases[(writable, key)], False
     except KeyError:
-        if path and not path.startswith('/'):
+        if path[0] not in ('/', '.'):
             path = os.path.join(data, path)
         if scheme == 'file':
             database = _xapian_database_open(path, writable, create, data, log)
@@ -248,11 +248,19 @@ def _xapian_database(endpoints, writable, create, data='.', log=logging):
                 database.add_database(_database)
 
     database._db = " ".join(d._db for d in database._all_databases if d)
-    log.debug("%s %s: %s", "Writable database" if writable else "Database", "used" if create else "opened", database._db)
+    num = len(database._all_databases)
+    log.debug("%s %s with %d endpoint%s", "Writable database" if writable else "Database", "used" if create else "opened", num, '' if num == 1 else 's')
     return database
 
 
-def _xapian_spawn(address, path, data='.', log=logging):
+def _xapian_spawn(address, path, writable=True, data='.', log=logging):
+    if path[0] not in ('/', '.'):
+        path = os.path.join(data, path)
+    if not os.path.isdir(path):
+        if writable:
+            os.makedirs(path)
+        else:
+            raise IOError("Cannot create directory '%s' (No such file or directory)" % path)
     args = [XAPIAN_TCPSRV, '--interface=%s' % address[0], '--port=%s' % address[1], '--timeout=0', '--writable', '--quiet', path]
     FNULL = open(os.devnull, 'w')
     try:
@@ -260,7 +268,8 @@ def _xapian_spawn(address, path, data='.', log=logging):
         log.info("Spawned xapian TCP server for \"%s\": %s:%s (pid:%s)", path, address[0], address[1], process.pid)
         # Try conncting...
         retries = 0
-        max_retries = 10
+        max_retries = 4
+        address = ('127.0.0.1' if address[0] == '0.0.0.0' else address[0], address[1])
         while retries <= max_retries:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(0.1)
