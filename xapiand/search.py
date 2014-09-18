@@ -6,7 +6,7 @@ import logging
 import xapian
 
 from . import json
-from .core import xapian_reopen, get_slot, get_prefix, expand_terms, find_terms, get_document, get_data, get_value, get_termlist, DOCUMENT_CUSTOM_TERM_PREFIX
+from .core import get_slot, get_prefix, expand_terms, find_terms, DOCUMENT_CUSTOM_TERM_PREFIX
 from .serialise import normalize, serialise_value
 from .exceptions import XapianError
 
@@ -43,7 +43,7 @@ class Search(object):
 
     def setup(self):
         queryparser = xapian.QueryParser()
-        queryparser.set_database(self.database)
+        queryparser.set_database(self.database.database)
 
         query = None
 
@@ -101,8 +101,8 @@ class Search(object):
             try:
                 query = queryparser.parse_query(search, flags)
             except (xapian.NetworkError, xapian.DatabaseModifiedError):
-                self.database = xapian_reopen(self.database, data=self.data, log=self.log)
-                queryparser.set_database(self.database)
+                self.database.reopen()
+                queryparser.set_database(self.database.database)
                 query = queryparser.parse_query(search, flags)
 
         partials = self.search.get('partials')
@@ -120,8 +120,8 @@ class Search(object):
                 try:
                     _partials_query = queryparser.parse_query(partial, flags)
                 except (xapian.NetworkError, xapian.DatabaseModifiedError):
-                    self.database = xapian_reopen(self.database, data=self.data, log=self.log)
-                    queryparser.set_database(self.database)
+                    self.database.reopen()
+                    queryparser.set_database(self.database.database)
                     _partials_query = queryparser.parse_query(partial, flags)
                 if partials_query:
                     partials_query = xapian.Query(
@@ -152,8 +152,8 @@ class Search(object):
                 try:
                     terms_query = queryparser.parse_query(term, flags)
                 except (xapian.NetworkError, xapian.DatabaseModifiedError):
-                    self.database = xapian_reopen(self.database, data=self.data, log=self.log)
-                    queryparser.set_database(self.database)
+                    self.database.reopen()
+                    queryparser.set_database(self.database.database)
                     terms_query = queryparser.parse_query(term, flags)
                 if query:
                     query = xapian.Query(
@@ -176,7 +176,7 @@ class Search(object):
         self.sort_by_reversed = self.search.get('sort_by_reversed')
 
     def get_enquire(self):
-        enquire = xapian.Enquire(self.database)
+        enquire = xapian.Enquire(self.database.database)
         # enquire.set_weighting_scheme(xapian.BoolWeight())
         # enquire.set_docid_order(xapian.Enquire.DONT_CARE)
         # if weighting_scheme:
@@ -232,13 +232,7 @@ class Search(object):
         return enquire
 
     def get_results(self):
-        try:
-            doccount = self.database.get_doccount()
-        except (xapian.NetworkError, xapian.DatabaseModifiedError):
-            database = xapian_reopen(self.database, data=self.data, log=self.log)
-            if self.database != database:
-                self.database = database
-            doccount = self.database.get_doccount()
+        doccount = self.database.get_doccount()
 
         maxitems = max(min(self.maxitems, doccount - self.first, MAX_DOCS), 0)
         check_at_least = max(min(self.check_at_least, doccount, MAX_DOCS), 0)
@@ -250,9 +244,7 @@ class Search(object):
             enquire = self.get_enquire()
             matches = enquire.get_mset(self.first, maxitems, check_at_least)
         except (xapian.NetworkError, xapian.DatabaseModifiedError):
-            database = xapian_reopen(self.database, data=self.data, log=self.log)
-            if self.database != database:
-                self.database = database
+            self.database.reopen()
             try:
                 enquire = self.get_enquire()
                 matches = enquire.get_mset(self.first, maxitems, check_at_least)
@@ -283,10 +275,10 @@ class Search(object):
         produced = 0
         for match in matches:
             docid = match.docid
-            self.database, document = get_document(self.database, docid, data=self.data, log=self.log)
+            document = self.database.get_document(docid)
 
             self.dead or 'alive'  # Raises DeadException when needed
-            self.database, id = get_value(self.database, document, get_slot('ID'), data=self.data, log=self.log)
+            id = self.database.get_value(document, get_slot('ID'))
 
             produced += 1
             result = {
@@ -297,7 +289,7 @@ class Search(object):
                 'percent': match.percent,
             }
             if self.get_data:
-                self.database, data = get_data(self.database, document, data=self.data, log=self.log)
+                data = self.database.get_data(document)
                 if data is None:
                     continue
                 try:
@@ -309,7 +301,7 @@ class Search(object):
                 })
             if self.get_terms:
                 terms = []
-                self.database, termlist = get_termlist(self.database, document, data=self.data, log=self.log)
+                termlist = self.database.get_termlist(document)
                 for t in termlist:
                     self.dead or 'alive'  # Raises DeadException when needed
                     terms.append(t.term.decode('utf-8'))

@@ -3,7 +3,7 @@ from __future__ import absolute_import, unicode_literals
 import logging
 
 from .. import version
-from ..core import xapian_index, xapian_commit, xapian_delete, xapian_database, DatabasesPool
+from ..core import DatabasesPool
 from ..parser import index_parser, search_parser
 from ..search import Search
 from ..exceptions import XapianError
@@ -14,10 +14,10 @@ class Xapian(object):
     def __init__(self, *args, **kwargs):
         self._do_create = False
         self._do_reopen = False
-        self.databases_pool = DatabasesPool()
         self.active_endpoints = None
         self.data = kwargs.pop('data', '.')
         self.log = kwargs.pop('log', logging)
+        self.databases_pool = DatabasesPool(data=self.data, log=self.log)
         using = kwargs.pop('using', None)
         open_ = kwargs.pop('open', None)
         if using:
@@ -70,7 +70,7 @@ class Xapian(object):
 
     def _search(self, query, get_matches, get_data, get_terms, get_size):
         reopen, self._do_reopen = self._do_reopen, False
-        with xapian_database(self.databases_pool, self.active_endpoints, writable=False, create=self._do_create, reopen=reopen, data=self.data, log=self.log) as database:
+        with self.databases_pool.database(self.active_endpoints, writable=False, create=self._do_create, reopen=reopen) as database:
             search = Search(
                 database,
                 query,
@@ -183,15 +183,15 @@ class Xapian(object):
             return size
         else:
             reopen, self._do_reopen = self._do_reopen, False
-            with xapian_database(self.databases_pool, self.active_endpoints, writable=False, create=self._do_create, reopen=reopen, data=self.data, log=self.log) as database:
+            with self.databases_pool.database(self.active_endpoints, writable=False, create=self._do_create, reopen=reopen) as database:
                 size = database.get_doccount()
                 return size
 
     def _delete(self, id, commit):
         self._check_db()
         reopen, self._do_reopen = self._do_reopen, False
-        with xapian_database(self.databases_pool, self.active_endpoints, writable=True, create=self._do_create, reopen=reopen, data=self.data, log=self.log) as database:
-            xapian_delete(database, commit=commit, data=self.data, log=self.log)
+        with self.databases_pool.database(self.active_endpoints, writable=True, create=self._do_create, reopen=reopen) as database:
+            database.delete(commit=commit)
 
     def delete(self, id):
         self._delete(id, False)
@@ -209,8 +209,8 @@ class Xapian(object):
         if not endpoints:
             self._check_db()
         reopen, self._do_reopen = self._do_reopen, False
-        with xapian_database(self.databases_pool, endpoints, writable=True, create=self._do_create, reopen=reopen, data=self.data, log=self.log) as database:
-            xapian_index(database, document, commit=commit, data=self.data, log=self.log)
+        with self.databases_pool.database(endpoints, writable=True, create=self._do_create, reopen=reopen) as database:
+            database.index(document, commit=commit)
 
     def index(self, obj=None, **kwargs):
         self._index(obj, False, **kwargs)
@@ -222,5 +222,5 @@ class Xapian(object):
     def commit(self):
         self._check_db()
         reopen, self._do_reopen = self._do_reopen, False
-        with xapian_database(self.databases_pool, self.active_endpoints, writable=True, create=self._do_create, reopen=reopen, data=self.data, log=self.log) as database:
-            xapian_commit(database, data=self.data, log=self.log)
+        with self.databases_pool.database(self.active_endpoints, writable=True, create=self._do_create, reopen=reopen) as database:
+            database.commit()

@@ -373,12 +373,55 @@ class DatabasesPoolQueue(CleanableObject):
     def cleanup(self, data='.', log=logging):
         if not self.cleaned:
             for database in self.unused:
-                xapian_close(database, data=data, log=log)
+                database.close()
             self.cleaned = True
 
 
 class DatabasesPool(CleanablePool):
-    pass
+    def __init__(self, *args, **kwargs):
+        self.data = kwargs.pop('data', '.')
+        self.log = kwargs.pop('log', logging)
+        super(DatabasesPool, self).__init__(*args, **kwargs)
+
+    @contextmanager
+    def database(self, endpoints, writable, create=False, reopen=False):
+        """
+        Returns a xapian.Database with multiple endpoints attached.
+
+        """
+        database = None
+        new = False
+        endpoints = tuple(build_url(*parse_url(db.strip())) for db in endpoints)
+
+        with self.lock:
+            pool_queue = self.setdefault((writable, endpoints), DatabasesPoolQueue())
+            with pool_queue.lock:
+                try:
+                    database = pool_queue.unused.pop()
+                    pool_queue.used.add(database)
+                except IndexError:
+                    new = True
+                pool_queue.time = time.time()
+
+        try:
+            if new:
+                database = Database(endpoints, writable, create, data=self.data, log=self.log)
+                pool_queue.used.add(database)
+            if reopen:
+                database.reopen()
+
+            yield database
+
+        finally:
+            with pool_queue.lock:
+                if database:
+                    pool_queue.used.discard(database)
+                    if len(pool_queue.unused) < 10:
+                        if not database.database._closed:
+                            pool_queue.unused.append(database)
+                    else:
+                        database.close()
+                pool_queue.time = time.time()
 
 
 class TcpPool(CleanablePool):
@@ -407,291 +450,277 @@ class TcpPool(CleanablePool):
 tcpservers = TcpPool()
 
 
-def xapian_close(database, data='.', log=logging):
-    subdatabases = database._subdatabases
+class Database(object):
+    def __init__(self, endpoints, writable, create, data='.', log=logging):
+        self.data = data
+        self.log = log
+        self.database = _xapian_database(endpoints, writable, create, data=data, log=log)
 
-    # Could not be opened, try full reopen:
-    endpoints = database._endpoints
-    writable = isinstance(database, xapian.WritableDatabase)
+    def __str__(self):
+        return self.database._db
 
-    # Remove database from pool
-    _database = subdatabases.pop((writable, endpoints), None)
-    assert not _database or _database == database
-    # ...and close.
-    if database:
-        database.close()
-
-    # Subdatabases cleanup:
-    for subdatabase in database._all_databases:
-        subdatabase_number = database._all_databases.index(subdatabase)
-        db, writable, create = database._all_databases_config[subdatabase_number]
-        scheme, hostname, port, username, password, path, query, query_dict = parse_url(db)
-        key = (scheme, hostname, port, username, password, path)
-
-        # Remove subdatabase from pool
-        _subdatabase = subdatabases.pop((writable, key), None)
-        assert not _subdatabase or _subdatabase == subdatabase
-        # ...and close (close on the main database should have already closed it anyway).
-        if subdatabase:
-            subdatabase.close()
-
-    database._closed = True
-    log.debug("Database %s: %s", "closed", database._db)
-
-
-def xapian_reopen(database, data='.', log=logging):
-    try:
-        database.reopen()
-    except (xapian.DatabaseOpeningError, xapian.NetworkError) as exc:
-        log.error("xapian_reopen database: %s", exc)
+    def close(self):
+        database = self.database
+        subdatabases = database._subdatabases
 
         # Could not be opened, try full reopen:
-        xapian_close(database)
-
         endpoints = database._endpoints
         writable = isinstance(database, xapian.WritableDatabase)
-        database = _xapian_database(endpoints, writable, False, data=data, log=log)
 
-    return database
+        # Remove database from pool
+        _database = subdatabases.pop((writable, endpoints), None)
+        assert not _database or _database == database
+        # ...and close.
+        if database:
+            database.close()
 
+        # Subdatabases cleanup:
+        for subdatabase in database._all_databases:
+            subdatabase_number = database._all_databases.index(subdatabase)
+            db, writable, create = database._all_databases_config[subdatabase_number]
+            scheme, hostname, port, username, password, path, query, query_dict = parse_url(db)
+            key = (scheme, hostname, port, username, password, path)
 
-def xapian_index(database, document, commit=False, data='.', log=logging):
-    document_id, document_values, document_terms, document_texts, document_data, default_language, default_spelling, default_positions = document
+            # Remove subdatabase from pool
+            _subdatabase = subdatabases.pop((writable, key), None)
+            assert not _subdatabase or _subdatabase == subdatabase
+            # ...and close (close on the main database should have already closed it anyway).
+            if subdatabase:
+                subdatabase.close()
 
-    document = xapian.Document()
+        database._closed = True
+        self.log.debug("Database %s: %s", "closed", database._db)
 
-    if document_data:
-        document.set_data(document_data)
+    def reopen(self):
+        database = self.database
+        try:
+            database.reopen()
 
-    for name, value in (document_values or {}).items():
-        name = name.strip()
-        slot = get_slot(name)
-        if slot:
-            value = serialise_value(value)[0]
-            if value:
-                document.add_value(slot, value)
-        else:
-            log.warning("Ignored document value name (%r)", name)
+        except (xapian.DatabaseOpeningError, xapian.NetworkError) as exc:
+            self.log.error("xapian_reopen database: %s", exc)
 
-    if isinstance(document_id, basestring):
-        document.add_value(get_slot('ID'), document_id)
-        document_id = prefixed(document_id, DOCUMENT_ID_TERM_PREFIX)
-        document.add_boolean_term(document_id)  # Make sure document_id is also a term (otherwise it doesn't replace an existing document)
+            # Could not be opened, try full reopen:
+            self.close()
 
-    for terms in document_terms or ():
-        if isinstance(terms, (tuple, list)):
-            terms, weight, prefix, position = (list(terms) + [None] * 4)[:4]
-        else:
-            weight = prefix = position = None
-        if not terms:
-            continue
+            endpoints = database._endpoints
+            writable = isinstance(database, xapian.WritableDatabase)
+            self.database = _xapian_database(endpoints, writable, False, data=self.data, log=self.log)
 
-        weight = 1 if weight is None else weight
-        prefix = '' if prefix is None else prefix
+        return self.database
 
-        for term, field_name, terms in find_terms(terms, None):
-            if field_name:
-                boolean = not field_name.islower()
-                term_prefix = get_prefix(field_name, DOCUMENT_CUSTOM_TERM_PREFIX)
+    def index(self, document, commit=False):
+        database = self.database
+        document_id, document_values, document_terms, document_texts, document_data, default_language, default_spelling, default_positions = document
+
+        document = xapian.Document()
+
+        if document_data:
+            document.set_data(document_data)
+
+        for name, value in (document_values or {}).items():
+            name = name.strip()
+            slot = get_slot(name)
+            if slot:
+                value = serialise_value(value)[0]
+                if value:
+                    document.add_value(slot, value)
             else:
-                boolean = not prefix.islower()
-                term_prefix = prefix
-            if boolean:
-                term = terms
-            for term in serialise_value(term):
-                if term:
-                    if not boolean:
-                        term = term.lower()
-                    if position is None:
-                        document.add_term(prefixed(term, term_prefix), weight)
-                    else:
-                        document.add_posting(prefixed(term, term_prefix), position, weight)
-            if boolean:
-                break
+                self.log.warning("Ignored document value name (%r)", name)
 
-    for text in document_texts or ():
-        if isinstance(text, (tuple, list)):
-            text, weight, prefix, language, spelling, positions = (list(text) + [None] * 6)[:6]
-        else:
-            weight = prefix = language = spelling = positions = None
-        if not text:
-            continue
+        if isinstance(document_id, basestring):
+            document.add_value(get_slot('ID'), document_id)
+            document_id = prefixed(document_id, DOCUMENT_ID_TERM_PREFIX)
+            document.add_boolean_term(document_id)  # Make sure document_id is also a term (otherwise it doesn't replace an existing document)
 
-        weight = 1 if weight is None else weight
-        prefix = '' if prefix is None else prefix
-        language = default_language if language is None else language
-        positions = default_positions if positions is None else positions
-        spelling = default_spelling if spelling is None else spelling
+        for terms in document_terms or ():
+            if isinstance(terms, (tuple, list)):
+                terms, weight, prefix, position = (list(terms) + [None] * 4)[:4]
+            else:
+                weight = prefix = position = None
+            if not terms:
+                continue
 
-        term_generator = xapian.TermGenerator()
-        term_generator.set_database(database)
-        term_generator.set_document(document)
-        if language:
-            term_generator.set_stemmer(xapian.Stem(language))
-        if positions:
-            index_text = term_generator.index_text
-        else:
-            index_text = term_generator.index_text_without_positions
-        if spelling:
-            term_generator.set_flags(xapian.TermGenerator.FLAG_SPELLING)
-        index_text(normalize(text), weight, prefix.upper())
+            weight = 1 if weight is None else weight
+            prefix = '' if prefix is None else prefix
 
-    return xapian_replace(database, document_id, document)
+            for term, field_name, terms in find_terms(terms, None):
+                if field_name:
+                    boolean = not field_name.islower()
+                    term_prefix = get_prefix(field_name, DOCUMENT_CUSTOM_TERM_PREFIX)
+                else:
+                    boolean = not prefix.islower()
+                    term_prefix = prefix
+                if boolean:
+                    term = terms
+                for term in serialise_value(term):
+                    if term:
+                        if not boolean:
+                            term = term.lower()
+                        if position is None:
+                            document.add_term(prefixed(term, term_prefix), weight)
+                        else:
+                            document.add_posting(prefixed(term, term_prefix), position, weight)
+                if boolean:
+                    break
 
+        for text in document_texts or ():
+            if isinstance(text, (tuple, list)):
+                text, weight, prefix, language, spelling, positions = (list(text) + [None] * 6)[:6]
+            else:
+                weight = prefix = language = spelling = positions = None
+            if not text:
+                continue
 
-def xapian_replace(database, document_id, document, commit=False, data='.', log=logging):
-    try:
-        docid = database.replace_document(document_id, document)
-    except xapian.InvalidArgumentError as exc:
-        log.error("%s", exc)
-    except (xapian.NetworkError, xapian.DatabaseError):
-        _database = xapian_reopen(database, data=data, log=log)
-        if database != _database:
-            database = _database
+            weight = 1 if weight is None else weight
+            prefix = '' if prefix is None else prefix
+            language = default_language if language is None else language
+            positions = default_positions if positions is None else positions
+            spelling = default_spelling if spelling is None else spelling
+
+            term_generator = xapian.TermGenerator()
+            term_generator.set_database(database)
+            term_generator.set_document(document)
+            if language:
+                term_generator.set_stemmer(xapian.Stem(language))
+            if positions:
+                index_text = term_generator.index_text
+            else:
+                index_text = term_generator.index_text_without_positions
+            if spelling:
+                term_generator.set_flags(xapian.TermGenerator.FLAG_SPELLING)
+            index_text(normalize(text), weight, prefix.upper())
+
+        return self.replace(document_id, document)
+
+    def replace(self, document_id, document, commit=False):
+        database = self.database
         try:
             docid = database.replace_document(document_id, document)
         except xapian.InvalidArgumentError as exc:
-            log.error("%s", exc)
-        except (xapian.NetworkError, xapian.DatabaseError) as exc:
-            raise XapianError(exc)
-    if commit:
-        database = xapian_commit(database, data=data, log=log)
-    return database, docid
+            self.log.error("%s", exc)
+        except (xapian.NetworkError, xapian.DatabaseError):
+            try:
+                _database = self.reopen()
+                if database != _database:
+                    database = _database
+                docid = database.replace_document(document_id, document)
+            except xapian.InvalidArgumentError as exc:
+                self.log.error("%s", exc)
+            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+                raise XapianError(exc)
+        if commit:
+            database = self.commit()
+        return docid
 
-
-def xapian_delete(database, document_id, commit=False, data='.', log=logging):
-    try:
-        database.delete_document(document_id)
-    except (xapian.NetworkError, xapian.DatabaseError):
-        _database = xapian_reopen(database, data=data, log=log)
-        if database != _database:
-            database = _database
+    def delete(self, document_id, commit=False, data='.', log=logging):
+        database = self.database
         try:
             database.delete_document(document_id)
-        except (xapian.NetworkError, xapian.DatabaseError) as exc:
-            raise XapianError(exc)
-    if commit:
-        database = xapian_commit(database, data=data, log=log)
-    return database
+        except (xapian.NetworkError, xapian.DatabaseError):
+            try:
+                _database = self.reopen()
+                if database != _database:
+                    database = _database
+                database.delete_document(document_id)
+            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+                raise XapianError(exc)
+        if commit:
+            database = self.commit()
 
-
-def xapian_commit(database, data='.', log=logging):
-    try:
-        database.commit()
-    except (xapian.NetworkError, xapian.DatabaseError):
-        _database = xapian_reopen(database, data=data, log=log)
-        if database != _database:
-            database = _database
+    def commit(self):
+        database = self.database
         try:
             database.commit()
-        except (xapian.NetworkError, xapian.DatabaseError) as exc:
-            raise XapianError(exc)
-    log.debug("Commit executed: %s", database._db)
-    return database
+        except (xapian.NetworkError, xapian.DatabaseError):
+            try:
+                _database = self.reopen()
+                if database != _database:
+                    database = _database
+                database.commit()
+            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+                raise XapianError(exc)
+        self.log.debug("Commit executed: %s", database._db)
 
+    def get_uuid(self):
+        database = self.database
+        return database.get_uuid()
 
-def get_document(database, docid, data='.', log=logging):
-    try:
-        document = database.get_document(docid)
-    except (xapian.NetworkError, xapian.DatabaseError):
-        _database = xapian_reopen(database, data=data, log=log)
-        if database != _database:
-            database = _database
+    def get_doccount(self):
+        database = self.database
+        try:
+            doccount = database.get_doccount()
+        except (xapian.NetworkError, xapian.DatabaseModifiedError):
+            try:
+                _database = self.reopen()
+                if _database != database:
+                    self.database = database = _database
+                doccount = database.get_doccount()
+            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+                raise XapianError(exc)
+        return doccount
+
+    def get_document(self, docid):
+        database = self.database
         try:
             document = database.get_document(docid)
-        except (xapian.NetworkError, xapian.DatabaseError) as exc:
-            raise XapianError(exc)
-    return database, document
+        except (xapian.NetworkError, xapian.DatabaseError):
+            try:
+                _database = self.reopen()
+                if _database != database:
+                    database = _database
+                document = database.get_document(docid)
+            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+                raise XapianError(exc)
+        return document
 
-
-def get_value(database, document, slot, data='.', log=logging):
-    try:
-        value = document.get_value(slot)
-    except (xapian.NetworkError, xapian.DatabaseError):
-        _database = xapian_reopen(database, data=data, log=log)
-        if database != _database:
-            database = _database
-            document = database.get_document(document.get_docid())
+    def get_value(self, document, slot):
+        database = self.database
         try:
             value = document.get_value(slot)
-        except (xapian.NetworkError, xapian.DatabaseError) as exc:
-            raise XapianError(exc)
-    return database, value
+        except (xapian.NetworkError, xapian.DatabaseError):
+            try:
+                _database = self.reopen()
+                if _database != database:
+                    database = _database
+                    document = database.get_document(document.get_docid())
+                value = document.get_value(slot)
+            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+                raise XapianError(exc)
+        return value
 
-
-def get_data(database, document, data='.', log=logging):
-    try:
-        _data = document.get_data()
-    except xapian.DocNotFoundError:
-        return
-    except (xapian.NetworkError, xapian.DatabaseError):
-        _database = xapian_reopen(database, data=data, log=log)
-        if database != _database:
-            database = _database
-            document = database.get_document(document.get_docid())
+    def get_data(self, document):
+        database = self.database
         try:
             _data = document.get_data()
         except xapian.DocNotFoundError:
             return
-        except (xapian.NetworkError, xapian.DatabaseError) as exc:
-            raise XapianError(exc)
-    return database, _data
+        except (xapian.NetworkError, xapian.DatabaseError):
+            try:
+                _database = self.reopen()
+                if _database != database:
+                    database = _database
+                    document = database.get_document(document.get_docid())
+                _data = document.get_data()
+            except xapian.DocNotFoundError:
+                return
+            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+                raise XapianError(exc)
+        return _data
 
-
-def get_termlist(database, document, data='.', log=logging):
-    try:
-        termlist = document.termlist()
-    except (xapian.NetworkError, xapian.DatabaseError):
-        _database = xapian_reopen(database, data=data, log=log)
-        if database != _database:
-            database = _database
-            document = database.get_document(document.get_docid())
+    def get_termlist(self, document):
+        database = self.database
         try:
             termlist = document.termlist()
-        except (xapian.NetworkError, xapian.DatabaseError) as exc:
-            raise XapianError(exc)
-    return database, termlist
-
-
-@contextmanager
-def xapian_database(databases_pool, endpoints, writable, create=False, reopen=False, data='.', log=logging):
-    """
-    Returns a xapian.Database with multiple endpoints attached.
-
-    """
-    database = None
-    new = False
-    endpoints = tuple(build_url(*parse_url(db.strip())) for db in endpoints)
-
-    with databases_pool.lock:
-        pool_queue = databases_pool.setdefault((writable, endpoints), DatabasesPoolQueue())
-        with pool_queue.lock:
+        except (xapian.NetworkError, xapian.DatabaseError):
             try:
-                database = pool_queue.unused.pop()
-                pool_queue.used.add(database)
-            except IndexError:
-                new = True
-            pool_queue.time = time.time()
-
-    try:
-        if new:
-            database = _xapian_database(endpoints, writable, create, data=data, log=log)
-            pool_queue.used.add(database)
-        if reopen:
-            database = xapian_reopen(database, data=data, log=log)
-
-        yield database
-
-    finally:
-        with pool_queue.lock:
-            if database:
-                pool_queue.used.discard(database)
-                if len(pool_queue.unused) < 10:
-                    if not database._closed:
-                        pool_queue.unused.append(database)
-                else:
-                    xapian_close(database)
-            pool_queue.time = time.time()
+                _database = self.reopen()
+                if _database != database:
+                    database = _database
+                    document = database.get_document(document.get_docid())
+                termlist = document.termlist()
+            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+                raise XapianError(exc)
+        return termlist
 
 
 def xapian_cleanup(databases_pool, timeout, data='.', log=logging):

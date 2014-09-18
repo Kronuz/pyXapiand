@@ -15,7 +15,7 @@ from hashlib import md5
 
 from .. import version, json
 from ..exceptions import InvalidIndexError, XapianError
-from ..core import DatabasesPool, xapian_database, xapian_cleanup, xapian_close, xapian_commit, xapian_index, xapian_delete, xapian_spawn, DATABASE_MAX_LIFE
+from ..core import DatabasesPool, xapian_cleanup, xapian_spawn, DATABASE_MAX_LIFE
 from ..platforms import create_pidlock
 from ..utils import parse_url, build_url, format_time
 from ..parser import index_parser, search_parser
@@ -199,7 +199,7 @@ class XapiandReceiver(CommandReceiver):
     def _search(self, query, get_matches, get_data, get_terms, get_size, dead, counting=False):
         try:
             reopen, self._do_reopen = self._do_reopen, False
-            with xapian_database(self.databases_pool, self.active_endpoints, writable=False, create=self._do_create, reopen=reopen, data=self.data, log=self.log) as database:
+            with self.databases_pool.database(self.active_endpoints, writable=False, create=self._do_create, reopen=reopen) as database:
                 start = time.time()
 
                 search = Search(
@@ -294,7 +294,7 @@ class XapiandReceiver(CommandReceiver):
             return self._search(query, get_matches=False, get_data=False, get_terms=False, get_size=True, dead=False, counting=True)  # dead is False because command it's not threaded
         try:
             reopen, self._do_reopen = self._do_reopen, False
-            with xapian_database(self.databases_pool, self.active_endpoints, writable=False, create=self._do_create, reopen=reopen, data=self.data, log=self.log) as database:
+            with self.databases_pool.database(self.active_endpoints, writable=False, create=self._do_create, reopen=reopen) as database:
                 size = database.get_doccount()
                 self.sendLine(">> OK: %s documents found in %s" % (size, format_time(time.time() - start)))
                 return size
@@ -478,15 +478,15 @@ def _database_command(database, cmd, args, data='.', log=logging):
     docid = None
     try:
         if cmd == 'INDEX':
-            database, docid = xapian_index(database, *args, data=data, log=log)
+            docid = database.index(*args)
         elif cmd == 'CINDEX':
-            database, docid = xapian_index(database, *args, commit=True, data=data, log=log)
+            docid = database.index(*args, commit=True)
         elif cmd == 'DELETE':
-            database = xapian_delete(database, *args, data=data, log=log)
+            database.delete(database, *args)
         elif cmd == 'CDELETE':
-            database = xapian_delete(database, *args, commit=True, data=data, log=log)
+            database.delete(database, *args, commit=True)
         elif cmd == 'COMMIT':
-            database = xapian_commit(database, *args, data=data, log=log)
+            database.commit(*args)
         else:
             unknown = True
     except Exception as exc:
@@ -494,8 +494,7 @@ def _database_command(database, cmd, args, data='.', log=logging):
         raise
     duration = time.time() - start
     docid = ' -> %s' % docid if docid else ''
-    log.debug("Executed %s %s(%s)%s (%s) ~%s", "unknown command" if unknown else "command", cmd, arg, docid, database._db, format_time(duration))
-    return database
+    log.debug("Executed %s %s(%s)%s (%s) ~%s", "unknown command" if unknown else "command", cmd, arg, docid, database, format_time(duration))
 
 
 def _database_commit(database, to_commit, commit_lock, timeouts, force=False, data='.', log=logging):
@@ -521,13 +520,11 @@ def _database_commit(database, to_commit, commit_lock, timeouts, force=False, da
                     log.warning("Out of commit slots, commit delayed! (%s)", db)
         if do_commit:
             try:
-                database = _database_command(database, 'COMMIT', (), data=data, log=log)
+                _database_command(database, 'COMMIT', (), data=data, log=log)
                 del to_commit[db]
             finally:
                 if locked:
                     commit_lock.release()
-
-    return database
 
 
 def _enqueue(msg, queue, data='.', log=logging):
@@ -582,7 +579,7 @@ def _writer_loop(databases, databases_pool, db, tq, commit_lock, timeouts, data,
     queue.queue = tq.queue
 
     # Open the database
-    with xapian_database(databases_pool, (db,), writable=True, create=True, data=data, log=log) as database:
+    with databases_pool.database((db,), writable=True, create=True) as database:
         log.info("New writer %s: %s (%s)", name, db, database.get_uuid())
         msg = None
         timeout = timeouts.timeout
@@ -611,7 +608,7 @@ def _writer_loop(databases, databases_pool, db, tq, commit_lock, timeouts, data,
                     continue
 
                 last = now
-                database = _database_command(database, cmd, args, data=data, log=log)
+                _database_command(database, cmd, args, data=data, log=log)
 
                 if cmd in ('INDEX', 'DELETE'):
                     now = time.time()
@@ -621,7 +618,7 @@ def _writer_loop(databases, databases_pool, db, tq, commit_lock, timeouts, data,
                         to_commit[db] = (now, now, now)
 
         _database_commit(database, to_commit, commit_lock, timeouts, force=True, data=data, log=log)
-        xapian_close(database, data=data, log=log)
+        database.close()
         databases.pop(db, None)
 
     log.debug("Writer %s ended! ~ lived for %s", name, format_time(time.time() - start))
@@ -678,7 +675,7 @@ def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask
         maximum=commit_timeout * 9.0,
     )
 
-    databases_pool = DatabasesPool()
+    databases_pool = DatabasesPool(data=data, log=log)
     databases = {}
 
     xapian_server = XapiandServer((address, port), databases_pool=databases_pool, data=data, log=log)
