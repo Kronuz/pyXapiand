@@ -136,8 +136,9 @@ def _writer_loop(databases, databases_pool, db, tq, commit_lock, timeouts, data,
 
     # Open the database
     try:
+        log.info("New writer %s: %s", name, db)
         with databases_pool.database((db,), writable=True, create=True) as database:
-            log.info("New writer %s: %s (%s)", name, db, database.get_uuid())
+            log.debug("Database UUID: %s", database.get_uuid())
             msg = None
             timeout = timeouts.timeout
             while not STOPPED:
@@ -180,7 +181,7 @@ def _writer_loop(databases, databases_pool, db, tq, commit_lock, timeouts, data,
             _database_commit(database, to_commit, commit_lock, timeouts, force=True, data=data, log=log)
             database.close()
         databases.pop(db, None)
-        log.debug("Writer %s ended! ~ lived for %s", name, format_time(time.time() - start))
+        log.info("Writer %s ended! ~ lived for %s", name, format_time(time.time() - start))
 
 
 def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=0,
