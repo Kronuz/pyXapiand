@@ -258,12 +258,34 @@ def _xapian_spawn(address, path, data='.', log=logging):
     try:
         process = subprocess.Popen(args, stdout=FNULL, stderr=subprocess.STDOUT)
         log.info("Spawned xapian TCP server for \"%s\": %s:%s (pid:%s)", path, address[0], address[1], process.pid)
+        # Try conncting...
+        retries = 0
+        max_retries = 10
+        while retries <= max_retries:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.1)
+            try:
+                sock.connect(address)
+                break
+            except socket.error as exc:
+                if exc.errno == socket.EISCONN:
+                    break   # we're good
+                if exc.errno == socket.EINVAL:
+                    # we're doomed, recreate socket
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(0.1)
+            except Exception:
+                pass
+            gevent.sleep(0.3)
+            retries += 1
+        if retries <= max_retries:
+            sock.close()
+        else:
+            log.error("Could not connect to spawned server!")
         return process
     except Exception as exc:
         log.error("Can't exec %r: %s", ' '.join(args), exc)
         raise IOError("Cannot spawn xapian TCP server process")
-    finally:
-        gevent.sleep(0.1)
 
 
 def _xapian_spawner(db, parse, data='.', log=logging):
