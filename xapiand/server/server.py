@@ -453,17 +453,43 @@ def get_queue(name, log=logging):
     return QUEUES.setdefault(name, PQueue(name=name, log=log))
 
 
-def _flush_queue(queue):
-    msg = True
-    while msg is not None:
-        try:
-            msg = queue.get(False)
-        except Queue.Empty:
-            msg = None
-
-
 def _database_name(db):
     return QUEUE_WRITER_THREAD % md5(db).hexdigest()
+
+
+def _enqueue(msg, queue, data='.', log=logging):
+    if not STOPPED:
+        try:
+            queue.put(msg)
+        except Queue.Full:
+            log.error("Cannot send command to queue! (3)")
+
+
+def _xapian_init(endpoints, queue=None, data='.', log=logging):
+    if not queue:
+        queue = get_queue(name=QUEUE_WRITER_MAIN, log=log)
+    _enqueue(('INIT', endpoints, ()), queue=queue, data=data, log=log)
+
+
+def _xapian_commit(db, data='.', log=logging):
+    db = build_url(*parse_url(db.strip()))
+    name = _database_name(db)
+    queue = get_queue(name=os.path.join(data, name), log=log)
+    _enqueue(('COMMIT', (db,), ()), queue=queue, data=data, log=log)
+
+
+def _xapian_index(db, document, commit=False, data='.', log=logging):
+    db = build_url(*parse_url(db.strip()))
+    name = _database_name(db)
+    queue = get_queue(name=os.path.join(data, name), log=log)
+    _enqueue(('CINDEX' if commit else 'INDEX', (db,), (document,)), queue=queue, data=data, log=log)
+
+
+def _xapian_delete(db, document_id, commit=False, data='.', log=logging):
+    db = build_url(*parse_url(db.strip()))
+    name = _database_name(db)
+    queue = get_queue(name=name, log=log)
+    _enqueue(('CDELETE' if commit else 'DELETE', (db,), (document_id,)), queue=queue, data=data, log=log)
 
 
 def _database_command(database, cmd, args, data='.', log=logging):
@@ -525,41 +551,6 @@ def _database_commit(database, to_commit, commit_lock, timeouts, force=False, da
             finally:
                 if locked:
                     commit_lock.release()
-
-
-def _enqueue(msg, queue, data='.', log=logging):
-    if not STOPPED:
-        try:
-            queue.put(msg)
-        except Queue.Full:
-            log.error("Cannot send command to queue! (3)")
-
-
-def _xapian_init(endpoints, queue=None, data='.', log=logging):
-    if not queue:
-        queue = get_queue(name=QUEUE_WRITER_MAIN, log=log)
-    _enqueue(('INIT', endpoints, ()), queue=queue, data=data, log=log)
-
-
-def _xapian_commit(db, data='.', log=logging):
-    db = build_url(*parse_url(db.strip()))
-    name = _database_name(db)
-    queue = get_queue(name=os.path.join(data, name), log=log)
-    _enqueue(('COMMIT', (db,), ()), queue=queue, data=data, log=log)
-
-
-def _xapian_index(db, document, commit=False, data='.', log=logging):
-    db = build_url(*parse_url(db.strip()))
-    name = _database_name(db)
-    queue = get_queue(name=os.path.join(data, name), log=log)
-    _enqueue(('CINDEX' if commit else 'INDEX', (db,), (document,)), queue=queue, data=data, log=log)
-
-
-def _xapian_delete(db, document_id, commit=False, data='.', log=logging):
-    db = build_url(*parse_url(db.strip()))
-    name = _database_name(db)
-    queue = get_queue(name=name, log=log)
-    _enqueue(('CDELETE' if commit else 'DELETE', (db,), (document_id,)), queue=queue, data=data, log=log)
 
 
 def _writer_loop(databases, databases_pool, db, tq, commit_lock, timeouts, data, log):
