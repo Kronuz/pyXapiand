@@ -132,50 +132,55 @@ def _writer_loop(databases, databases_pool, db, tq, commit_lock, timeouts, data,
     queue = type(tq)(tq.maxsize)
     queue.queue = tq.queue
 
+    database = None
+
     # Open the database
-    with databases_pool.database((db,), writable=True, create=True) as database:
-        log.info("New writer %s: %s (%s)", name, db, database.get_uuid())
-        msg = None
-        timeout = timeouts.timeout
-        while not STOPPED:
-            _database_commit(database, to_commit, commit_lock, timeouts, data=data, log=log)
+    try:
+        with databases_pool.database((db,), writable=True, create=True) as database:
+            log.info("New writer %s: %s (%s)", name, db, database.get_uuid())
+            msg = None
+            timeout = timeouts.timeout
+            while not STOPPED:
+                _database_commit(database, to_commit, commit_lock, timeouts, data=data, log=log)
 
-            now = time.time()
-            try:
-                msg = queue.get(True, timeout)
-            except Queue.Empty:
-                if now - last > DATABASE_MAX_LIFE:
-                    log.debug("Writer timeout... stopping!")
-                    break
-                continue
-            if not msg:
-                continue
-            try:
-                cmd, endpoints, args = msg
-            except ValueError:
-                log.error("Wrong command received!")
-                continue
-
-            for _db in endpoints:
-                _db = build_url(*parse_url(_db.strip()))
-                if _db != db:
+                now = time.time()
+                try:
+                    msg = queue.get(True, timeout)
+                except Queue.Empty:
+                    if now - last > DATABASE_MAX_LIFE:
+                        log.debug("Writer timeout... stopping!")
+                        break
+                    continue
+                if not msg:
+                    continue
+                try:
+                    cmd, endpoints, args = msg
+                except ValueError:
+                    log.error("Wrong command received!")
                     continue
 
-                last = now
-                _database_command(database, cmd, args, data=data, log=log)
+                for _db in endpoints:
+                    _db = build_url(*parse_url(_db.strip()))
+                    if _db != db:
+                        continue
 
-                if cmd in ('INDEX', 'DELETE'):
-                    now = time.time()
-                    if db in to_commit:
-                        to_commit[db] = (to_commit[db][0], to_commit[db][1], now)
-                    else:
-                        to_commit[db] = (now, now, now)
+                    last = now
+                    _database_command(database, cmd, args, data=data, log=log)
 
-        _database_commit(database, to_commit, commit_lock, timeouts, force=True, data=data, log=log)
-        database.close()
+                    if cmd in ('INDEX', 'DELETE'):
+                        now = time.time()
+                        if db in to_commit:
+                            to_commit[db] = (to_commit[db][0], to_commit[db][1], now)
+                        else:
+                            to_commit[db] = (now, now, now)
+    except Exception as e:
+        log.error("Writer ERROR: %s", e)
+    finally:
+        if database:
+            _database_commit(database, to_commit, commit_lock, timeouts, force=True, data=data, log=log)
+            database.close()
         databases.pop(db, None)
-
-    log.debug("Writer %s ended! ~ lived for %s", name, format_time(time.time() - start))
+        log.debug("Writer %s ended! ~ lived for %s", name, format_time(time.time() - start))
 
 
 def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=0,

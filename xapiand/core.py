@@ -4,7 +4,6 @@ import os
 import re
 import time
 import logging
-import binascii
 import subprocess
 from hashlib import md5
 from collections import deque
@@ -88,7 +87,7 @@ def get_slot(name):
 
 def get_prefix(name, prefix=''):
     slot = get_slot(name)
-    slot = binascii.unhexlify(b'{:08x}'.format(slot))
+    slot = '{:x}'.format(slot).upper()
     return '%s%s:' % (prefix, slot)
 
 
