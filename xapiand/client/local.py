@@ -99,16 +99,16 @@ class Xapian(object):
             query['ranges'] = ranges
         if partials is not None:
             query['partials'] = partials
-        del query['first']
+        query.pop('first', None)
         query['maxitems'] = 0
-        del query['sort_by']
+        query.pop('sort_by', None)
         search = self._search(query, get_matches=False, get_data=False, get_terms=False, get_size=False)
         return results_class(search.results)
 
     def terms(self, search=None, terms=None, ranges=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
         self._check_db()
         query = search_parser(search if isinstance(search, dict) else 'TERMS ' + search)
-        del query['facets']
+        query.pop('facets', None)
         if terms is not None:
             query['terms'] = terms
         if ranges is not None:
@@ -167,16 +167,16 @@ class Xapian(object):
     def count(self, search=None, terms=None, ranges=None, partials=None):
         if search or terms or partials:
             query = search_parser(search)
-            del query['facets']
+            query.pop('facets', None)
             if terms is not None:
                 query['terms'] = terms
             if ranges is not None:
                 query['ranges'] = ranges
             if partials is not None:
                 query['partials'] = partials
-            del query['first']
+            query.pop('first', None)
             query['maxitems'] = 0
-            del query['sort_by']
+            query.pop('sort_by', None)
             search = self._search(query, get_matches=False, get_data=False, get_terms=False, get_size=True)
             search.get_results().next()
             size = search.estimated

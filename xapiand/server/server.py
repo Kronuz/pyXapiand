@@ -195,9 +195,9 @@ class XapiandReceiver(CommandReceiver):
         query = search_parser(line)
         query['facets'] = query['facets'] or query['search']
         query['search'] = '*'
-        del query['first']
+        query.pop('first', None)
         query['maxitems'] = 0
-        del query['sort_by']
+        query.pop('sort_by', None)
         return self._search(query, get_matches=False, get_data=False, get_terms=False, get_size=False, dead=dead)
     facets.__doc__ = """
     Finds and lists the facets of a query.
@@ -208,7 +208,7 @@ class XapiandReceiver(CommandReceiver):
     @command(threaded=True, db=True, reopen=True)
     def terms(self, line='', dead=False):
         query = search_parser(line)
-        del query['facets']
+        query.pop('facets', None)
         return self._search(query, get_matches=True, get_data=False, get_terms=True, get_size=True, dead=dead)
     terms.__doc__ = """
     Finds and lists the terms of the documents.
@@ -241,10 +241,10 @@ class XapiandReceiver(CommandReceiver):
         start = time.time()
         if line:
             query = search_parser(line)
-            del query['facets']
-            del query['first']
+            query.pop('facets', None)
+            query.pop('first', None)
             query['maxitems'] = 0
-            del query['sort_by']
+            query.pop('sort_by', None)
             return self._search(query, get_matches=False, get_data=False, get_terms=False, get_size=True, dead=False, counting=True)  # dead is False because command it's not threaded
         try:
             reopen, self._do_reopen = self._do_reopen, False

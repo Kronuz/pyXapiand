@@ -93,16 +93,16 @@ class XapianConnection(Connection):
             query['ranges'] = ranges
         if partials is not None:
             query['partials'] = partials
-        del query['first']
+        query.pop('first', None)
         query['maxitems'] = 0
-        del query['sort_by']
+        query.pop('sort_by', None)
         results = self._search('FACETS', **query)
         return results_class(results)
 
     @command
     def terms(self, search=None, terms=None, ranges=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
         query = search_parser(search if isinstance(search, dict) else 'TERMS ' + search)
-        del query['facets']
+        query.pop('facets', None)
         if terms is not None:
             query['terms'] = terms
         if ranges is not None:
@@ -162,16 +162,16 @@ class XapianConnection(Connection):
     def count(self, search=None, terms=None, ranges=None, partials=None):
         if search or terms or partials:
             query = search_parser(search)
-            del query['facets']
+            query.pop('facets', None)
             if terms is not None:
                 query['terms'] = terms
             if ranges is not None:
                 query['ranges'] = ranges
             if partials is not None:
                 query['partials'] = partials
-            del query['first']
+            query.pop('first', None)
             query['maxitems'] = 0
-            del query['sort_by']
+            query.pop('sort_by', None)
             search = dumps(query, ensure_ascii=False)
         response = self._response(self.execute_command('COUNT', search))
         return int(response.split()[0])
