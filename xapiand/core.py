@@ -404,47 +404,7 @@ class TcpPool(CleanablePool):
         with self.lock:
             self.used.discard(port)
             self.unused.append(port)
-
-
-@contextmanager
-def xapian_database(databases_pool, endpoints, writable, create=False, reopen=False, data='.', log=logging):
-    """
-    Returns a xapian.Database with multiple endpoints attached.
-
-    """
-    database = None
-    new = False
-    endpoints = tuple(build_url(*parse_url(db.strip())) for db in endpoints)
-
-    with databases_pool.lock:
-        pool_queue = databases_pool.setdefault((writable, endpoints), DatabasesPoolQueue())
-        with pool_queue.lock:
-            try:
-                database = pool_queue.unused.pop()
-                pool_queue.used.add(database)
-            except IndexError:
-                new = True
-            pool_queue.time = time.time()
-
-    try:
-        if new:
-            database = _xapian_database(endpoints, writable, create, data=data, log=log)
-            pool_queue.used.add(database)
-        if reopen:
-            database = xapian_reopen(database, data=data, log=log)
-
-        yield database
-
-    finally:
-        with pool_queue.lock:
-            if database:
-                pool_queue.used.discard(database)
-                if len(pool_queue.unused) < 10:
-                    if not database._closed:
-                        pool_queue.unused.append(database)
-                else:
-                    xapian_close(database)
-            pool_queue.time = time.time()
+tcpservers = TcpPool()
 
 
 def xapian_close(database, data='.', log=logging):
@@ -630,14 +590,6 @@ def xapian_commit(database, data='.', log=logging):
     return database
 
 
-def xapian_cleanup(databases_pool, timeout, data='.', log=logging):
-    tcpservers.cleanup(timeout, data=data, log=log)
-    databases_pool.cleanup(timeout, data=data, log=log)
-
-
-tcpservers = TcpPool()
-
-
 def get_document(database, docid, data='.', log=logging):
     try:
         document = database.get_document(docid)
@@ -699,3 +651,49 @@ def get_termlist(database, document, data='.', log=logging):
         except (xapian.NetworkError, xapian.DatabaseError) as exc:
             raise XapianError(exc)
     return database, termlist
+
+
+@contextmanager
+def xapian_database(databases_pool, endpoints, writable, create=False, reopen=False, data='.', log=logging):
+    """
+    Returns a xapian.Database with multiple endpoints attached.
+
+    """
+    database = None
+    new = False
+    endpoints = tuple(build_url(*parse_url(db.strip())) for db in endpoints)
+
+    with databases_pool.lock:
+        pool_queue = databases_pool.setdefault((writable, endpoints), DatabasesPoolQueue())
+        with pool_queue.lock:
+            try:
+                database = pool_queue.unused.pop()
+                pool_queue.used.add(database)
+            except IndexError:
+                new = True
+            pool_queue.time = time.time()
+
+    try:
+        if new:
+            database = _xapian_database(endpoints, writable, create, data=data, log=log)
+            pool_queue.used.add(database)
+        if reopen:
+            database = xapian_reopen(database, data=data, log=log)
+
+        yield database
+
+    finally:
+        with pool_queue.lock:
+            if database:
+                pool_queue.used.discard(database)
+                if len(pool_queue.unused) < 10:
+                    if not database._closed:
+                        pool_queue.unused.append(database)
+                else:
+                    xapian_close(database)
+            pool_queue.time = time.time()
+
+
+def xapian_cleanup(databases_pool, timeout, data='.', log=logging):
+    tcpservers.cleanup(timeout, data=data, log=log)
+    databases_pool.cleanup(timeout, data=data, log=log)
