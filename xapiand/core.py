@@ -120,6 +120,7 @@ def _spawn_tcpservers(endpoints, data='.', log=logging):
             socket_timeout=1,
             weak=True,
             socket_class=socket.socket,
+            sleep=gevent.sleep,
         ))
         time_, address = xapiand.spawn(db)
         server = TcpDatabase(db, None, address)

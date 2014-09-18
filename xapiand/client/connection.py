@@ -121,7 +121,7 @@ def with_retry(func):
                 continue
             except (IOError, RuntimeError, socket.error, ConnectionError):
                 exc_info = sys.exc_info()
-                time.sleep(delay)
+                self.sleep(delay)
                 retries += 1
                 delay *= 3  # growing the delay
 
@@ -135,9 +135,10 @@ class Connection(object):
 
     def __init__(self, host='localhost', port=8890, endpoints=None,
                  max_connect_retries=5, reconnect_delay=0.1,
-                 socket_timeout=4, encoding='utf-8',
-                 encoding_errors='strict', socket_class=socket.socket):
+                 socket_timeout=4, encoding='utf-8', encoding_errors='strict',
+                 socket_class=socket.socket, sleep=time.sleep):
         self.socket_class = socket_class
+        self.sleep = sleep
         self.host = host
         self.port = port
         self.endpoints = endpoints
@@ -206,7 +207,7 @@ class Connection(object):
                     # we're doomed, recreate socket
                     sock = self.socket_class(socket.AF_INET, socket.SOCK_STREAM)
                     sock.settimeout(self.socket_timeout)
-                time.sleep(delay)
+                self.sleep(delay)
                 retries += 1
                 delay *= 3  # growing the delay
 
@@ -324,9 +325,10 @@ class ServerPool(object):
     def __init__(self, servers, max_pool_size=35, blacklist_time=60,
                  wait_for_connection=None, max_age=60, max_retries=3,
                  max_connect_retries=2, reconnect_delay=0.1,
-                 socket_timeout=4, socket_class=socket.socket,
+                 socket_timeout=4, socket_class=socket.socket, sleep=time.sleep,
                  encoding='utf-8', encoding_errors='strict'):
         self.socket_class = socket_class
+        self.sleep = sleep
         self.max_retries = max_retries
         self.max_connect_retries = max_connect_retries
         self.reconnect_delay = reconnect_delay
@@ -410,6 +412,7 @@ class ServerPool(object):
                 encoding=self.encoding,
                 encoding_errors=self.encoding_errors,
                 socket_class=self.socket_class,
+                sleep=self.sleep,
             )
             connection.context = context
             try:
