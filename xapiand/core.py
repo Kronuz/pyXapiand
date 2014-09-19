@@ -680,17 +680,27 @@ class Database(object):
 
     def get_uuid(self):
         database = self.database
-        return database.get_uuid()
+        try:
+            uuid = database.get_uuid()
+        except (xapian.NetworkError, xapian.DatabaseError):
+            try:
+                _database = self.reopen()
+                if _database != database:
+                    database = _database
+                uuid = database.get_uuid()
+            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+                raise XapianError(exc)
+        return uuid
 
     def get_doccount(self):
         database = self.database
         try:
             doccount = database.get_doccount()
-        except (xapian.NetworkError, xapian.DatabaseModifiedError):
+        except (xapian.NetworkError, xapian.DatabaseError):
             try:
                 _database = self.reopen()
                 if _database != database:
-                    self.database = database = _database
+                    database = _database
                 doccount = database.get_doccount()
             except (xapian.NetworkError, xapian.DatabaseError) as exc:
                 raise XapianError(exc)
