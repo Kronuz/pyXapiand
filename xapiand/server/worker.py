@@ -6,6 +6,7 @@ import time
 import Queue
 import signal
 import threading
+import logging
 
 import gevent
 from gevent import queue
@@ -47,7 +48,34 @@ AVAILABLE_QUEUES = {
     'default': DEFAULT_QUEUE,
 }
 
-import logging
+
+DATABASE_COMMANDS = {
+    'INDEX': (
+        'index',
+        lambda a: a[0][0],
+        dict(),
+    ),
+    'CINDEX': (
+        'index',
+        lambda a: a[0][0],
+        dict(commit=True),
+    ),
+    'DELETE': (
+        'delete',
+        lambda a: a[0],
+        dict(),
+    ),
+    'CDELETE': (
+        'delete',
+        lambda a: a[0],
+        dict(commit=True),
+    ),
+    'COMMIT': (
+        'commit',
+        lambda a: '',
+        dict(),
+    ),
+}
 
 
 class Obj(object):
@@ -56,34 +84,22 @@ class Obj(object):
 
 
 def _database_command(database, cmd, args, data='.', log=logging):
-    unknown = False
     start = time.time()
-    if cmd in ('INDEX', 'CINDEX'):
-        arg = args[0][0]
-    elif cmd in ('DELETE', 'CDELETE'):
-        arg = args[0]
-    else:
-        arg = ''
-    docid = None
     try:
-        if cmd == 'INDEX':
-            docid = database.index(*args)
-        elif cmd == 'CINDEX':
-            docid = database.index(*args, commit=True)
-        elif cmd == 'DELETE':
-            database.delete(database, *args)
-        elif cmd == 'CDELETE':
-            database.delete(database, *args, commit=True)
-        elif cmd == 'COMMIT':
-            database.commit(*args)
-        else:
-            unknown = True
+        attr, arg, kwargs = DATABASE_COMMANDS[cmd]
+        docid = getattr(database, attr)(*args, **kwargs)
     except Exception as exc:
         log.exception("%s", exc)
         raise
-    duration = time.time() - start
     docid = ' -> %s' % docid if docid else ''
-    log.debug("Executed %s %s(%s)%s (%s) ~%s", "unknown command" if unknown else "command", cmd, arg, docid, database, format_time(duration))
+    duration = time.time() - start
+    log.debug(
+        "Executed command %s(%s)%s ~%s",
+        cmd,
+        arg(args),
+        docid,
+        format_time(duration),
+    )
 
 
 def _database_commit(database, to_commit, commit_lock, timeouts, force=False, data='.', log=logging):
