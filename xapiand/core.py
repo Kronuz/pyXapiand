@@ -616,16 +616,16 @@ class Database(object):
             spelling = default_spelling if spelling is None else spelling
 
             term_generator = xapian.TermGenerator()
-            term_generator.set_database(database)
             term_generator.set_document(document)
+            if spelling:
+                term_generator.set_database(database)
+                term_generator.set_flags(xapian.TermGenerator.FLAG_SPELLING)
             if language:
                 term_generator.set_stemmer(xapian.Stem(language))
             if positions:
                 index_text = term_generator.index_text
             else:
                 index_text = term_generator.index_text_without_positions
-            if spelling:
-                term_generator.set_flags(xapian.TermGenerator.FLAG_SPELLING)
             index_text(normalize(text), weight, prefix.upper())
 
         return self.replace(document_id, document)
