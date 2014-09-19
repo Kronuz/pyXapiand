@@ -100,7 +100,7 @@ class Search(object):
             flags = xapian.QueryParser.FLAG_DEFAULT | xapian.QueryParser.FLAG_WILDCARD | xapian.QueryParser.FLAG_PURE_NOT
             try:
                 query = queryparser.parse_query(search, flags)
-            except (xapian.NetworkError, xapian.DatabaseModifiedError):
+            except (xapian.NetworkError, xapian.DatabaseError):
                 self.database.reopen()
                 queryparser.set_database(self.database.database)
                 query = queryparser.parse_query(search, flags)
@@ -119,7 +119,7 @@ class Search(object):
                 flags = xapian.QueryParser.FLAG_PARTIAL
                 try:
                     _partials_query = queryparser.parse_query(partial, flags)
-                except (xapian.NetworkError, xapian.DatabaseModifiedError):
+                except (xapian.NetworkError, xapian.DatabaseError):
                     self.database.reopen()
                     queryparser.set_database(self.database.database)
                     _partials_query = queryparser.parse_query(partial, flags)
@@ -151,7 +151,7 @@ class Search(object):
                 flags = xapian.QueryParser.FLAG_BOOLEAN | xapian.QueryParser.FLAG_PURE_NOT
                 try:
                     terms_query = queryparser.parse_query(term, flags)
-                except (xapian.NetworkError, xapian.DatabaseModifiedError):
+                except (xapian.NetworkError, xapian.DatabaseError):
                     self.database.reopen()
                     queryparser.set_database(self.database.database)
                     terms_query = queryparser.parse_query(term, flags)
@@ -243,7 +243,7 @@ class Search(object):
         try:
             enquire = self.get_enquire()
             matches = enquire.get_mset(self.first, maxitems, check_at_least)
-        except (xapian.NetworkError, xapian.DatabaseModifiedError):
+        except (xapian.NetworkError, xapian.DatabaseError):
             self.database.reopen()
             try:
                 enquire = self.get_enquire()
