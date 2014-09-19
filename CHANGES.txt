@@ -1,3 +1,9 @@
+v2.0.4 (2014-09-18)
+	+ Stability improvements
+	+ More reliable and cleaner codebase
+	+ Core refactoring (Database objects)
+	- Fixed many bugs
+
 v2.0.3 (2014-09-12)
 	+ Added DISTINCT
 	+ Added document ID to value
@@ -10,13 +16,13 @@ v2.0.2 (2014-09-11)
 	+ Added support for prefixes in queries
 	+ Remote databases support
 	+ TCP servers support (spawning them when needed)
-	+ Weak connectios
-	- Added missing worker.py file to the reopsitory
+	+ Weak connections
+	- Added missing worker.py file to the repository
 	- Better handling of processes
 
 v2.0.1 (2014-09-08)
 	+ Added initial take on Haystack backend
-	+ Added freebsd rc.d script
+	+ Added FreeBSD rc.d script
 	+ Introduced command IDs
 	- Fixed many bugs
 
