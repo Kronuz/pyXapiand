@@ -677,7 +677,6 @@ class Database(object):
                 database.commit()
             except (xapian.NetworkError, xapian.DatabaseError) as exc:
                 raise XapianError(exc)
-        self.log.debug("Commit executed: %s", database._db)
 
     def get_uuid(self):
         database = self.database

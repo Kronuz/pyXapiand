@@ -55,11 +55,11 @@ class AliveCommand(object):
         AliveCommand.cmds_duration += cmd_duration
         AliveCommand.cmds_count += 1
         logger(
-            "%s from %s %s%s ~%s (%0.3f cps)",
+            "%s %s%s by %s ~%s (%0.3f cps)",
             message % self.cmd_id,
-            self.origin,
             self.cmd,
             " -> %s" % results if results is not None else "",
+            self.origin,
             format_time(cmd_duration),
             AliveCommand.cmds_count / AliveCommand.cmds_duration,
         )
