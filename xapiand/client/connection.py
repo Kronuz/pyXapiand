@@ -1,8 +1,10 @@
 from __future__ import absolute_import, unicode_literals
 
+import six
+
 import sys
 import time
-import Queue
+from six.moves import queue
 import socket
 import weakref
 import contextlib
@@ -15,9 +17,9 @@ from ..exceptions import ConnectionError, NewConnection
 
 
 # Sentinel used to mark an empty slot in the ConnectionPool queue.
-# Using sys.maxint as the timestamp ensures that empty slots will always
-# sort *after* live connection objects in the queue.
-EMPTY_SLOT = (sys.maxint, None)
+# Using sys.maxsize as the timestamp ensures that empty slots will
+# always sort *after* live connection objects in the queue.
+EMPTY_SLOT = (six.MAXSIZE, None)
 
 
 def command(func=False, **kwargs):
@@ -38,7 +40,7 @@ class ConnectionPool(object):
         self._factory = weakref.ref(factory)
         self.maxsize = maxsize
         self.max_age = max_age
-        self.clients = Queue.PriorityQueue(maxsize)
+        self.clients = queue.PriorityQueue(maxsize)
         self.wait_for_connection = wait_for_connection
         # If there is a maxsize, prime the queue with empty slots.
         if maxsize is not None:
@@ -64,7 +66,7 @@ class ConnectionPool(object):
         while True:
             try:
                 ts, connection = self.clients.get(blocking, self.wait_for_connection)
-            except Queue.Empty:
+            except queue.Empty:
                 if blocking:
                     # timeout
                     raise Exception("No connections available in the pool")
@@ -125,7 +127,7 @@ def with_retry(func):
                 retries += 1
                 delay *= 3  # growing the delay
 
-        raise exc_info[0], exc_info[1], exc_info[2]
+        six.reraise(exc_info[0], exc_info[1], exc_info[2])
     return _with_retry
 
 
@@ -180,7 +182,7 @@ class Connection(object):
             except socket.error:
                 exc_info = sys.exc_info()
                 e = exc_info[1]
-                raise ConnectionError(self._error_message(e)), None, exc_info[2]
+                six.reraise(ConnectionError(self._error_message(e)), None, exc_info[2])
             self.client_socket = sock
         if not self.socket_file:
             self.socket_file = self.client_socket.makefile()
@@ -211,7 +213,7 @@ class Connection(object):
                 retries += 1
                 delay *= 3  # growing the delay
 
-        raise exc_info[0], exc_info[1], exc_info[2]
+        six.reraise(exc_info[0], exc_info[1], exc_info[2])
 
     def disconnect(self):
         "Disconnects from the server"
@@ -244,7 +246,7 @@ class Connection(object):
                 _errno, errmsg = 'UNKNOWN', e.args[0]
             else:
                 _errno, errmsg = e.args
-            raise ConnectionError("Error %s while writing to socket. %s." % (_errno, errmsg)), None, exc_info[2]
+            six.reraise(ConnectionError("Error %s while writing to socket. %s." % (_errno, errmsg)), None, exc_info[2])
         except Exception:
             self.disconnect()
             raise
@@ -279,7 +281,7 @@ class Connection(object):
                 self.disconnect()
                 exc_info = sys.exc_info()
                 e = exc_info[1]
-                raise ConnectionError("Error while reading from socket: %s" % (e.args,)), None, exc_info[2]
+                six.reraise(ConnectionError("Error while reading from socket: %s" % (e.args,)), None, exc_info[2])
 
     def pack_command(self, *args):
         return "%s%s" % (" ".join(a for a in args if a), self.delimiter)
@@ -373,7 +375,7 @@ class ServerPool(object):
                         exc_info = sys.exc_info()
                         retries += 1
 
-        raise exc_info[0], exc_info[1], exc_info[2]
+        six.reraise(exc_info[0], exc_info[1], exc_info[2])
 
     def _pick_server(self):
         # Update the blacklist
@@ -428,7 +430,7 @@ class ServerPool(object):
                 exc_info = sys.exc_info()
 
         if exc_info is not None:
-            raise exc_info[0], exc_info[1], exc_info[2]
+            six.reraise(exc_info[0], exc_info[1], exc_info[2])
         else:
             raise socket.timeout("No server left in the pool")
 

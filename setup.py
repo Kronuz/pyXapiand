@@ -38,6 +38,7 @@ setup(
         ]
     },
     install_requires=[
+        "six",
         "gevent",
     ],
 )
