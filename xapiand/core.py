@@ -175,7 +175,7 @@ def _xapian_database_open(path, writable, create, data='.', log=logging):
             try:
                 directory = os.path.dirname(path)
                 if directory and not os.path.isdir(directory):
-                    os.makedirs(directory, 0o700)
+                    os.makedirs(directory, 0700)
             except OSError:
                 pass
         if writable:
