@@ -49,29 +49,41 @@ option_list = (
 )
 
 
-def detach(path, argv, logfile=None, pidfile=None,
-           uid=None, gid=None, umask=0, working_directory=None, fake=False, **options):
+def detach(path, argv, logfile=None, pidfile=None, uid=None, gid=None, umask=0,
+           working_directory=None, fake=False, verbosity=None, data=None,
+           listener=None, queue_type=None, commit_timeout=None, commit_slots=None,
+           **options):
     with detached(logfile, pidfile, uid, gid, umask, working_directory, fake):
         try:
             args = list(argv)
-            if logfile:
+            if logfile is not None:
                 args.append('--logfile=%s' % logfile)
-            if pidfile:
+            if pidfile is not None:
                 args.append('--pidfile=%s' % pidfile)
-            os.execv(path, args)
+            if verbosity is not None:
+                args.append('--verbosity=%s' % verbosity)
+            if data is not None:
+                args.append('--data=%s' % data)
+            if listener is not None:
+                args.append('--listener=%s' % listener)
+            if queue_type is not None:
+                args.append('--queue=%s' % queue_type)
+            if commit_timeout is not None:
+                args.append('--commit_timeout=%s' % commit_timeout)
+            if commit_slots is not None:
+                args.append('--commit_slots=%s' % commit_slots)
+            os.execv(path, [path] + args)
         except Exception:
             print >>sys.stderr, "Can't exec %r" % ' '.join([path] + args)
         return EX_FAILURE
 
 
-def run(logfile=None, pidfile=None, *argv, **options):
+def run(*argv, **options):
     _detach = options.pop('detach', False)
     if _detach:
-        logfile = logfile or 'xapiand.log'
-        pidfile = pidfile or 'xapiand.pid'
-        sys.exit(detach(sys.argv[0], argv, logfile=logfile, pidfile=pidfile, **options))
+        sys.exit(detach(sys.argv[0], argv, **options))
     else:
-        sys.exit(xapiand_run(logfile=logfile, pidfile=pidfile, **options))
+        sys.exit(xapiand_run(**options))
 
 
 def main():
@@ -82,11 +94,11 @@ def main():
                           version=version,
                           option_list=base_option_list + option_list)
 
-    options, _args = parser.parse_args(sys.argv[1:])
+    options, argv = parser.parse_args(sys.argv[1:])
     if options.pythonpath:
         sys.path.insert(0, options.pythonpath)
 
-    run(*_args, **options.__dict__)
+    run(*argv, **options.__dict__)
 
 if __name__ == '__main__':
     main()
