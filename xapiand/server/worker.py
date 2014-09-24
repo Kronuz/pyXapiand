@@ -201,7 +201,7 @@ def _writer_loop(databases, databases_pool, db, tq, commit_lock, timeouts, data,
 
 
 def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=0,
-        working_directory=None, verbosity=2, commit_slots=None, commit_timeout=None,
+        working_directory=None, verbosity=1, commit_slots=None, commit_timeout=None,
         listener=None, queue_type=None, **options):
     global STOPPED
 
