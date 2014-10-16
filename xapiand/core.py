@@ -30,8 +30,8 @@ DOCUMENT_CUSTOM_TERM_PREFIX = 'X'
 
 KEY_RE = re.compile(r'[_a-zA-Z][_a-zA-Z0-9]*')
 
-PREFIX_RE = re.compile(r'(?:([_a-zA-Z][_a-zA-Z0-9]*):)?("[\w.]+"|[\w.]+)')
-TERM_SPLIT_RE = re.compile(r'\W')
+PREFIX_RE = re.compile(r'(?:([_a-zA-Z][_a-zA-Z0-9]*):)?("[-\w.]+"|[-\w.]+)')
+TERM_SPLIT_RE = re.compile(r'[^-\w.]')
 
 XAPIAN_PREFER_BRASS = True
 XAPIAN_TCPSRV = '/usr/local/bin/xapian-tcpsrv-1.3'
