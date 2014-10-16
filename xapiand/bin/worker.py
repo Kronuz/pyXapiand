@@ -38,7 +38,7 @@ option_list = (
     make_option("--gid", action='store', dest='gid', default=None),
     make_option("--umask", action='store', dest='umask', default=0, type='int'),
     make_option("--listener", action='store', dest='listener', default='0.0.0.0:8890',
-        help="Listener address for the sever, e.g. 0.0.0.0:8890 (default)"),
+        help="Bind address for the sever, e.g. 0.0.0.0:8890 (default)"),
     make_option("--detach", action='store_true', dest="detach", default=False,
         help="Detach process"),
     make_option("--queue", action='store', dest='queue_type', default='memory',
