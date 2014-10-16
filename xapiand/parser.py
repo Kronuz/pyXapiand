@@ -5,7 +5,7 @@ import re
 from . import json
 
 
-SPLIT_RE = re.compile(r'\s*,\s*|\s+')
+SPLIT_RE = re.compile(r'\s*[,;]\s*|\s+')
 
 OFFSET_RE = re.compile(r'\bOFFSET\s+(\d+)\b', re.IGNORECASE)
 LIMIT_RE = re.compile(r'\bLIMIT\s+(\d+)\b', re.IGNORECASE)

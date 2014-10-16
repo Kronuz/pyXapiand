@@ -10,6 +10,7 @@ import contextlib
 from errno import EISCONN, EINVAL, ECONNREFUSED
 from functools import wraps
 
+from ..parser import SPLIT_RE
 from ..exceptions import ConnectionError, NewConnection
 
 
@@ -342,7 +343,7 @@ class ServerPool(object):
             max_age=max_age,
         )
         if isinstance(servers, basestring):
-            self._servers = set(s.strip() for s in servers.split(';') if s.strip())
+            self._servers = set(s.strip() for s in SPLIT_RE.split(servers) if s.strip())
         else:
             self._servers = set(servers)
 

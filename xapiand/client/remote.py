@@ -49,7 +49,7 @@ class XapianConnection(Connection):
         if endpoints:
             if self._endpoints != endpoints:
                 assert isinstance(endpoints, (list, tuple)), "Endpoints must be a tuple"
-                self._response(self.execute_command('OPEN', ','.join(endpoints)))
+                self._response(self.execute_command('OPEN', ';'.join(endpoints)))
                 self._endpoints = endpoints
         else:
             self._response(self.execute_command('OPEN'))
@@ -59,7 +59,7 @@ class XapianConnection(Connection):
         if endpoints:
             if self._endpoints != endpoints:
                 assert isinstance(endpoints, (list, tuple)), "Endpoints must be a tuple"
-                self._response(self.execute_command('USING', ','.join(endpoints)))
+                self._response(self.execute_command('USING', ';'.join(endpoints)))
                 self._endpoints = endpoints
         else:
             self._response(self.execute_command('USING'))

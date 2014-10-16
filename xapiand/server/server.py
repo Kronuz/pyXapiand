@@ -8,7 +8,7 @@ from .. import version, json
 from ..exceptions import InvalidIndexError, XapianError
 from ..core import xapian_spawn
 from ..utils import parse_url, build_url, format_time
-from ..parser import index_parser, search_parser
+from ..parser import index_parser, search_parser, SPLIT_RE
 from ..search import Search
 
 from .base import CommandReceiver, CommandServer, command
@@ -110,7 +110,7 @@ class XapiandReceiver(CommandReceiver):
         """
         endpoints = line
         if endpoints:
-            endpoints = tuple(endpoints.split())
+            endpoints = tuple(SPLIT_RE.split(endpoints))
             try:
                 self._do_create = False
                 self._reopen(endpoints=endpoints)
@@ -137,7 +137,7 @@ class XapiandReceiver(CommandReceiver):
         """
         endpoints = line
         if endpoints:
-            endpoints = tuple(endpoints.split())
+            endpoints = tuple(SPLIT_RE.split(endpoints))
             try:
                 self._do_create = True
                 self._reopen(endpoints=endpoints)
