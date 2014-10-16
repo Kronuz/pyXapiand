@@ -16,6 +16,8 @@ def dumps(obj, **kwargs):
 
 
 class XapianConnection(Connection):
+    _endpoints = None
+
     def get_name(self):
         if self.endpoints:
             return " ".join(self.endpoints)
@@ -23,8 +25,8 @@ class XapianConnection(Connection):
             return ""
 
     def on_connect(self):
-        endpoints = getattr(self.context, 'endpoints', None)
-        if endpoints:
+        if self._endpoints:
+            endpoints, self._endpoints = self._endpoints, None
             self.using(endpoints)
 
     @command
@@ -37,29 +39,30 @@ class XapianConnection(Connection):
 
     @command
     def create(self, endpoint):
-        response = self._response(self.execute_command('CREATE', endpoint))
-        self.context.endpoints = [endpoint]
-        return response
+        endpoints = [endpoint]
+        if self._endpoints != endpoints:
+            self._response(self.execute_command('CREATE', endpoint))
+            self._endpoints = endpoints
 
     @command
     def open(self, endpoints=None):
         if endpoints:
-            assert isinstance(endpoints, (list, tuple)), "Endpoints must be a tuple"
-            response = self._response(self.execute_command('OPEN', ','.join(endpoints)))
-            self.context.endpoints = endpoints
+            if self._endpoints != endpoints:
+                assert isinstance(endpoints, (list, tuple)), "Endpoints must be a tuple"
+                self._response(self.execute_command('OPEN', ','.join(endpoints)))
+                self._endpoints = endpoints
         else:
-            response = self._response(self.execute_command('OPEN'))
-        return response
+            self._response(self.execute_command('OPEN'))
 
     @command
     def using(self, endpoints=None):
         if endpoints:
-            assert isinstance(endpoints, (list, tuple)), "Endpoints must be a tuple"
-            response = self._response(self.execute_command('USING', ','.join(endpoints)))
-            self.context.endpoints = endpoints
+            if self._endpoints != endpoints:
+                assert isinstance(endpoints, (list, tuple)), "Endpoints must be a tuple"
+                self._response(self.execute_command('USING', ','.join(endpoints)))
+                self._endpoints = endpoints
         else:
-            response = self._response(self.execute_command('USING'))
-        return response
+            self._response(self.execute_command('USING'))
 
     def _response(self, line):
         if line.startswith(">>"):
@@ -216,13 +219,18 @@ class Xapian(ServerPool):
     connection_class = XapianConnection
 
     def __init__(self, *args, **kwargs):
-        using = kwargs.pop('using', None)
-        open_ = kwargs.pop('open', None)
-        weak = kwargs.pop('weak', False)
+        self._using = kwargs.pop('using', None)
+        self._open = kwargs.pop('open', None)
+        self._weak = kwargs.pop('weak', False)
         super(Xapian, self).__init__(*args, **kwargs)
-        if weak:
-            self.weak()
-        if using:
-            self.using(using)
-        elif open_:
-            self.open(open_)
+
+    def call(self, name, *args, **kwargs):
+        def callback(xapian):
+            if self._weak:
+                xapian.weak()
+            if self._using:
+                xapian.using(self._using)
+            elif self._open:
+                xapian.open(self._open)
+            return getattr(xapian, name)(*args, **kwargs)
+        return self(callback)

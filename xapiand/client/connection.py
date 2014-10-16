@@ -6,7 +6,6 @@ import Queue
 import socket
 import weakref
 import contextlib
-import threading
 
 from errno import EISCONN, EINVAL, ECONNREFUSED
 from functools import wraps
@@ -32,10 +31,9 @@ def command(func=False, **kwargs):
 
 
 class ConnectionPool(object):
-    def __init__(self, factory, maxsize=None, max_age=60,
+    def __init__(self, server, maxsize=None, max_age=60,
                  wait_for_connection=None):
-        self._context_tl = threading.local()
-        self._factory = weakref.ref(factory)
+        self.server = weakref.ref(server)
         self.maxsize = maxsize
         self.max_age = max_age
         self.clients = Queue.PriorityQueue(maxsize)
@@ -46,18 +44,18 @@ class ConnectionPool(object):
                 self.clients.put(EMPTY_SLOT)
 
     def factory(self):
-        return self._factory()(self._context_tl)
+        return self.server().factory()
 
     @contextlib.contextmanager
-    def reserve(self):
+    def reserve(self, *args, **kwargs):
         """Context-manager to obtain a Client object from the pool."""
-        ts, connection = self._checkout_connection()
+        ts, connection = self._checkout_connection(*args, **kwargs)
         try:
             yield connection
         finally:
             self._checkin_connection(ts, connection)
 
-    def _checkout_connection(self):
+    def _checkout_connection(self, *args, **kwargs):
         # If there's no maxsize, no need to block waiting for a connection.
         blocking = self.maxsize is not None
         # Loop until we get a non-stale connection, or we create a new one.
@@ -88,7 +86,6 @@ class ConnectionPool(object):
                         raise
                 # If the connection is not stale, go ahead and use it.
                 if self.max_age is None or now - ts < self.max_age:
-                    connection.context = self._context_tl
                     return ts, connection
                 # Otherwise, the connection is stale.
                 # Close it, push an empty slot onto the queue, and retry.
@@ -349,32 +346,6 @@ class ServerPool(object):
         else:
             self._servers = set(servers)
 
-    def __getattr__(self, attr):
-        func = getattr(self.connection_class, attr)
-        command = func.command
-        if not command:
-            raise AttributeError
-        return lambda *args, **kwargs: self.call(attr, *args, **kwargs)
-
-    def call(self, name, *args, **kwargs):
-        retries = 0
-
-        while retries <= self.max_retries:
-            with self._pool.reserve() as connection:
-                try:
-                    func = getattr(connection, name)
-                except AttributeError:
-                    exc_info = sys.exc_info()
-                    retries = self.max_retries + 1
-                else:
-                    try:
-                        return func(*args, **kwargs)
-                    except (IOError, RuntimeError, socket.error, ConnectionError):
-                        exc_info = sys.exc_info()
-                        retries += 1
-
-        raise exc_info[0], exc_info[1], exc_info[2]
-
     def _pick_server(self):
         # Update the blacklist
         for server, age in self._blacklist.items():
@@ -397,7 +368,7 @@ class ServerPool(object):
     def _blacklist_server(self, server):
         self._blacklist[server] = time.time()
 
-    def _client_factory(self, context):
+    def factory(self):
         server = self._pick_server()
         exc_info = None
 
@@ -414,7 +385,6 @@ class ServerPool(object):
                 socket_class=self.socket_class,
                 sleep=self.sleep,
             )
-            connection.context = context
             try:
                 connection.connect()
                 return connection
@@ -432,5 +402,26 @@ class ServerPool(object):
         else:
             raise socket.timeout("No server left in the pool")
 
-    def __call__(self, context):
-        return self._client_factory(context)
+    def __call__(self, callback, *args, **kwargs):
+        """Context-manager to obtain a Client object from the pool."""
+        retries = 0
+        while retries <= self.max_retries:
+            with self._pool.reserve() as connection:
+                try:
+                    return callback(connection)
+                except (IOError, RuntimeError, socket.error, ConnectionError):
+                    exc_info = sys.exc_info()
+                    retries += 1
+        raise exc_info[0], exc_info[1], exc_info[2]
+
+    def call(self, name, *args, **kwargs):
+        def callback(connection):
+            return getattr(connection, name)(*args, **kwargs)
+        return self(callback)
+
+    def __getattr__(self, attr):
+        func = getattr(self.connection_class, attr)
+        command = func.command
+        if not command:
+            raise AttributeError
+        return lambda *args, **kwargs: self.call(attr, *args, **kwargs)
