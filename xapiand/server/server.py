@@ -34,7 +34,7 @@ class XapiandReceiver(CommandReceiver):
 
     def dispatch(self, func, line, command):
         if getattr(func, 'db', False) and not self.active_endpoints:
-            self.sendLine(">> ERR: %s" % "You must connect to a database first")
+            self.sendLine(">> ERR: [405] %s" % "You must connect to a database first")
             return
         if getattr(func, 'reopen', False) and self._do_reopen:
             self._reopen()
@@ -72,7 +72,7 @@ class XapiandReceiver(CommandReceiver):
             self._reopen()
             self.sendLine(">> OK")
         except InvalidIndexError as exc:
-            self.sendLine(">> ERR: REOPEN: %s" % exc)
+            self.sendLine(">> ERR: [500] REOPEN: %s" % exc)
 
     @command
     def create(self, line=''):
@@ -90,7 +90,7 @@ class XapiandReceiver(CommandReceiver):
                 self._reopen(endpoints=endpoints)
                 self.active_endpoints = endpoints
             except InvalidIndexError as exc:
-                self.sendLine(">> ERR: CREATE: %s" % exc)
+                self.sendLine(">> ERR: [500] CREATE: %s" % exc)
             self.sendLine(">> OK")
         else:
             self.sendLine(">> ERR: [405] You must specify a valid endpoint for the database")
@@ -116,12 +116,12 @@ class XapiandReceiver(CommandReceiver):
                 self._reopen(endpoints=endpoints)
                 self.active_endpoints = endpoints
             except InvalidIndexError as exc:
-                self.sendLine(">> ERR: OPEN: %s" % exc)
+                self.sendLine(">> ERR: [500] OPEN: %s" % exc)
                 return
         if self.active_endpoints:
             self.sendLine(">> OK")
         else:
-            self.sendLine(">> ERR: [405] Select a database with the command OPEN")
+            self.sendLine(">> ERR: [405] %s" % "You must connect to a database first")
 
     @command
     def using(self, line=''):
@@ -143,7 +143,7 @@ class XapiandReceiver(CommandReceiver):
                 self._reopen(endpoints=endpoints)
                 self.active_endpoints = endpoints
             except InvalidIndexError as exc:
-                self.sendLine(">> ERR: USING: %s" % exc)
+                self.sendLine(">> ERR: [500] USING: %s" % exc)
                 return
         if self.active_endpoints:
             self.sendLine(">> OK")
@@ -175,7 +175,7 @@ class XapiandReceiver(CommandReceiver):
                         for result in search.results:
                             self.sendLine(json.dumps(result, ensure_ascii=False))
                     except XapianError as exc:
-                        self.sendLine(">> ERR: Unable to get results: %s" % exc)
+                        self.sendLine(">> ERR: [500] Unable to get results: %s" % exc)
                         return
 
                     query_string = str(search.query)
@@ -187,7 +187,7 @@ class XapiandReceiver(CommandReceiver):
                 self.sendLine(">> OK: %s documents found in %s" % (size, format_time(time.time() - start)))
                 return size
         except InvalidIndexError as exc:
-            self.sendLine(">> ERR: %s" % exc)
+            self.sendLine(">> ERR: [500] %s" % exc)
             return
 
     @command(threaded=True, db=True, reopen=True)
@@ -253,7 +253,7 @@ class XapiandReceiver(CommandReceiver):
                 self.sendLine(">> OK: %s documents found in %s" % (size, format_time(time.time() - start)))
                 return size
         except InvalidIndexError as exc:
-            self.sendLine(">> ERR: COUNT: %s" % exc)
+            self.sendLine(">> ERR: [500] COUNT: %s" % exc)
     count.__doc__ = """
     Counts matching documents.
 
@@ -312,7 +312,7 @@ class XapiandReceiver(CommandReceiver):
                 endpoints = self.active_endpoints
             self._reopen(endpoints)
             if not endpoints:
-                self.sendLine(">> ERR: %s" % "You must connect to a database first")
+                self.sendLine(">> ERR: [405] %s" % "You must connect to a database first")
                 return
             for db in endpoints:
                 db = build_url(*parse_url(db.strip()))
