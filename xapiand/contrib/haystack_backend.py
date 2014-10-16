@@ -1,7 +1,5 @@
 from __future__ import absolute_import, unicode_literals
 
-import hashlib
-
 try:
     import cPickle as pickle
 except ImportError:
@@ -18,53 +16,12 @@ from haystack.backends import BaseEngine, BaseSearchBackend, BaseSearchQuery, lo
 from haystack.models import SearchResult
 from haystack.utils import get_identifier, get_model_ct
 
+from django.utils import six
+from django.utils.importlib import import_module
 from django.core.exceptions import ImproperlyConfigured
 
 DOCUMENT_TAGS_FIELD = 'tags'
 DOCUMENT_AC_FIELD = 'ac'
-
-
-def consistent_hash(key, num_buckets):
-    """
-    A Fast, Minimal Memory, Consistent Hash Algorithm (Jump Consistent Hash)
-
-    Hash accepts "a 64-bit key and the number of buckets. It outputs a number
-    in the range [0, buckets]." - http://arxiv.org/ftp/arxiv/papers/1406/1406.2294.pdf
-
-    The C++ implementation they provide is as follows:
-
-    int32_t JumpConsistentHash(uint64_t key, int32_t num_buckets) {
-        int64_t b = -1, j = 0;
-        while (j < num_buckets) {
-            b   = j;
-            key = key * 2862933555777941757ULL + 1;
-            j   = (b + 1) * (double(1LL << 31) / double((key >> 33) + 1));
-        }
-        return b;
-    }
-
-    assert consistent_hash(1, 1) == 0
-    assert consistent_hash(256, 1024) == 520
-    assert consistent_hash(42, 57) == 43
-    assert consistent_hash(0xDEAD10CC, -666) == 0
-    assert consistent_hash(0xDEAD10CC, 1) == 0
-    assert consistent_hash(0xDEAD10CC, 666) == 361
-
-    """
-    if num_buckets == 1:
-        return 0
-    if not isinstance(key, (int, long)):
-        if isinstance(key, unicode):
-            key = key.encode('utf-8')
-        key = int(hashlib.md5(key).hexdigest(), 16) & 0xffffffffffffffff
-    b, j = -1, 0
-    if num_buckets < 0:
-        num_buckets = 1
-    while j < num_buckets:
-        b = int(j)
-        key = ((key * 2862933555777941757) + 1) & 0xffffffffffffffff
-        j = float(b + 1) * (float(1 << 31) / float((key >> 33) + 1))
-    return b & 0xffffffff
 
 
 class XapianSearchResults(XapianResults):
@@ -89,18 +46,24 @@ class XapianSearchBackend(BaseSearchBackend):
     def __init__(self, connection_alias, language=None, **connection_options):
         super(XapianSearchBackend, self).__init__(connection_alias, **connection_options)
 
-        endpoints = connection_options.get('ENDPOINTS', [])
-        if not isinstance(endpoints, (tuple, list)):
-            endpoints = [endpoints]
+        endpoints = connection_options.get('ENDPOINTS')
+        if isinstance(endpoints, six.string_types):
+            router_module, _, router_class = endpoints.rpartition('.')
+            router_module = import_module(router_module)
+            router_class = getattr(router_module, router_class)
+            endpoints = router_class()
 
         if not endpoints:
             raise ImproperlyConfigured("You must specify 'ENDPOINTS' in your settings for connection '%s'." % connection_alias)
-        timeout = connection_options.get('TIMEOUT', None)
-        servers = connection_options.get('SERVERS', '127.0.0.1:8890')
-        self.xapian = Xapian(servers, using=endpoints, socket_timeout=timeout)
+        self.timeout = connection_options.get('TIMEOUT', None)
+        self.servers = connection_options.get('SERVERS', '127.0.0.1:8890')
+        self.language = language or connection_options.get('LANGUAGE', 'english')
         self.endpoints = endpoints
 
-        self.language = language or connection_options.get('LANGUAGE', 'english')
+    def xapian(self, *args, **kwargs):
+        if not hasattr(self, '_xapian'):
+            self._xapian = Xapian(self.servers, socket_timeout=self.timeout)
+        return self._xapian(*args, **kwargs)
 
     def updater(self, index, obj, commit):
         data = index.full_prepare(obj)
@@ -191,24 +154,33 @@ class XapianSearchBackend(BaseSearchBackend):
         term_prefix = get_prefix(DJANGO_CT.upper(), DOCUMENT_CUSTOM_TERM_PREFIX)
         document_terms.append(dict(term=get_model_ct(obj), weight=0, prefix=term_prefix))
 
-        document_id = get_identifier(obj)
-        endpoint = self.endpoints[consistent_hash(document_id, len(self.endpoints))]
-        self.xapian.index(
-            id=document_id,
-            data=document_data,
-            terms=document_terms,
-            values=document_values,
-            texts=document_texts,
-            endpoints=[endpoint],
-            positions=True,
-        )
+        endpoints = self.endpoints.for_write(instance=obj)
+
+        def callback(xapian):
+            return xapian.index(
+                id=get_identifier(obj),
+                data=document_data,
+                terms=document_terms,
+                values=document_values,
+                texts=document_texts,
+                endpoints=endpoints,
+                positions=True,
+            )
+        self.xapian(callback)
 
     def update(self, index, iterable, commit=False, mod=False):
         for obj in iterable:
             self.updater(index, obj, commit=commit)
 
     def remove(self, obj, commit=False):
-        pass
+        endpoints = self.endpoints.for_write(instance=obj)
+
+        def callback(xapian):
+            xapian.using(endpoints)
+            xapian.delete(
+                id=get_identifier(obj),
+            )
+        self.xapian(callback)
 
     def clear(self, models=[], commit=True):
         pass
@@ -253,15 +225,21 @@ class XapianSearchBackend(BaseSearchBackend):
             _query_string = query_string
             query_string = _query_string.replace('### AND ###', '###').replace('(###)', '###')
         query_string = query_string.replace('###', '')
-        results = self.xapian.search(
-            query_string,
-            offset=offset,
-            limit=limit,
-            results_class=XapianSearchResults,
-            ranges=ranges,
-            terms=terms,
-            partials=partials,
-        )
+        endpoints = self.endpoints.for_read(models=models)
+
+        def callback(xapian):
+            xapian.using(endpoints)
+            return xapian.search(
+                query_string,
+                offset=offset,
+                limit=limit,
+                results_class=XapianSearchResults,
+                ranges=ranges,
+                terms=terms,
+                partials=partials,
+            )
+        results = self.xapian(callback)
+
         for facet in results.facets:
             facets['fields'][facet['name']] = (facet['term'], facet['termfreq'])
 
