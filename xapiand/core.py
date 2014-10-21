@@ -534,13 +534,16 @@ class Database(object):
     def reopen(self):
         database = self.database
         try:
+            if database._closed:
+                raise xapian.DatabaseError("Already closed database")
             database.reopen()
 
-        except (xapian.DatabaseOpeningError, xapian.NetworkError) as exc:
-            self.log.error("xapian_reopen database: %s", exc)
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            if not database._closed:
+                self.log.error("xapian_reopen database: %s", exc)
 
-            # Could not be opened, try full reopen:
-            self.close()
+                # Could not be opened, try full reopen:
+                self.close()
 
             endpoints = database._endpoints
             writable = isinstance(database, xapian.WritableDatabase)
