@@ -20,7 +20,7 @@ from .serialise import serialise_value, normalize
 from .utils import parse_url, build_url
 from .platforms import pid_exists
 
-DATABASE_MAX_LIFE = 900  # stop writer adter 15 minutes of inactivity
+DATABASE_MAX_LIFE = 900  # 900 = stop writer after 15 minutes of inactivity
 DATABASE_SHORT_LIFE = max(DATABASE_MAX_LIFE - 60, DATABASE_MAX_LIFE - DATABASE_MAX_LIFE / 3, 0)
 
 MIN_TCP_SERVER_PORTS = 100
