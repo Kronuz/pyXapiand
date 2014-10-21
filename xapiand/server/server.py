@@ -6,7 +6,7 @@ from hashlib import md5
 
 from .. import version, json
 from ..exceptions import InvalidIndexError, XapianError
-from ..core import xapian_spawn
+from ..core import xapian_spawn, DATABASE_SHORT_LIFE
 from ..utils import parse_url, build_url, format_time
 from ..parser import index_parser, search_parser, SPLIT_RE
 from ..search import Search
@@ -29,7 +29,7 @@ class XapiandReceiver(CommandReceiver):
         self._do_create = False
         self._do_reopen = False
         self._do_init = set()
-        self._inited = set()
+        self._inited = {}
         self.active_endpoints = None
 
     def dispatch(self, func, line, command):
@@ -266,12 +266,13 @@ class XapiandReceiver(CommandReceiver):
     """
 
     def _init(self):
+        now = time.time()
         while self._do_init:
             endpoints = self._do_init.pop()
-            if endpoints not in self._inited:
+            if endpoints not in self._inited or now - self._inited[endpoints] > DATABASE_SHORT_LIFE:
                 queue = self.server.main_queue
                 queue.put(('INIT', endpoints, ()))
-                self._inited.add(endpoints)
+                self._inited[endpoints] = now
 
     def _delete(self, document_id, commit):
         self._reopen()
