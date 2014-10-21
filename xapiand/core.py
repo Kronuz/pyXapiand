@@ -143,7 +143,9 @@ def _xapian_subdatabase(subdatabases, db, writable, create, data='.', log=loggin
     scheme, hostname, port, username, password, path, query, query_dict = parse
     key = (scheme, hostname, port, username, password, path)
     try:
-        return subdatabases[(writable, key)], False
+        database = subdatabases[(writable, key)]
+        log.debug("%s %s: %s", "Writable endpoint" if writable else "Endpoint", "re-used" if create else "re-opened", database._db)
+        return database, False
     except KeyError:
         if path[0] not in ('/', '.'):
             path = os.path.join(data, path)
