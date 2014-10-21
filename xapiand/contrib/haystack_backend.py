@@ -20,6 +20,11 @@ from django.utils import six
 from django.utils.importlib import import_module
 from django.core.exceptions import ImproperlyConfigured
 
+try:
+    from async import async
+except ImportError:
+    async = lambda f: f
+
 DOCUMENT_TAGS_FIELD = 'tags'
 DOCUMENT_AC_FIELD = 'ac'
 
@@ -167,7 +172,7 @@ class XapianSearchBackend(BaseSearchBackend):
                 endpoints=endpoints,
                 positions=True,
             )
-        self.xapian(callback)
+        async(self.xapian)(callback)
 
     def update(self, index, iterable, commit=False, mod=False):
         for obj in iterable:
@@ -182,7 +187,7 @@ class XapianSearchBackend(BaseSearchBackend):
             xapian.delete(
                 id=document_id,
             )
-        self.xapian(callback)
+        async(self.xapian)(callback)
 
     def clear(self, models=[], commit=True):
         pass
