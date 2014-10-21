@@ -188,8 +188,8 @@ class XapianSearchBackend(BaseSearchBackend):
         pass
 
     @log_query
-    def search(self, query_string, start_offset, end_offset=None,
-               ranges=None, terms=None, partials=None, models=None,
+    def search(self, query_string, start_offset, end_offset=None, ranges=None,
+               terms=None, partials=None, models=None, hints=None,
                **kwargs):
         """
         Returns:
@@ -227,7 +227,8 @@ class XapianSearchBackend(BaseSearchBackend):
             _query_string = query_string
             query_string = _query_string.replace('### AND ###', '###').replace('(###)', '###')
         query_string = query_string.replace('###', '')
-        endpoints = self.endpoints.for_read(models=models)
+        hints = hints or {}
+        endpoints = self.endpoints.for_read(models=models, **hints)
 
         def callback(xapian):
             xapian.using(endpoints)
