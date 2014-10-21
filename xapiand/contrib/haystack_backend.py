@@ -155,10 +155,11 @@ class XapianSearchBackend(BaseSearchBackend):
         document_terms.append(dict(term=get_model_ct(obj), weight=0, prefix=term_prefix))
 
         endpoints = self.endpoints.for_write(instance=obj)
+        document_id = get_identifier(obj)
 
         def callback(xapian):
             return xapian.index(
-                id=get_identifier(obj),
+                id=document_id,
                 data=document_data,
                 terms=document_terms,
                 values=document_values,
@@ -174,11 +175,12 @@ class XapianSearchBackend(BaseSearchBackend):
 
     def remove(self, obj, commit=False):
         endpoints = self.endpoints.for_write(instance=obj)
+        document_id = get_identifier(obj)
 
         def callback(xapian):
             xapian.using(endpoints)
             xapian.delete(
-                id=get_identifier(obj),
+                id=document_id,
             )
         self.xapian(callback)
 
