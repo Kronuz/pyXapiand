@@ -501,6 +501,9 @@ class Database(object):
 
     def close(self):
         database = self.database
+        if database._closed:
+            return
+
         subdatabases = database._subdatabases
 
         # Could not be opened, try full reopen:
@@ -539,17 +542,16 @@ class Database(object):
             database.reopen()
 
         except (xapian.NetworkError, xapian.DatabaseError) as exc:
-            if not database._closed:
-                self.log.error("xapian_reopen database: %s", exc)
+            # Could not be opened, try full reopen:
+            self.log.error("xapian_reopen database: %s", exc)
 
-                # Could not be opened, try full reopen:
-                self.close()
-
+            self.close()
             endpoints = database._endpoints
             writable = isinstance(database, xapian.WritableDatabase)
-            self.database = _xapian_database(endpoints, writable, False, data=self.data, log=self.log)
+            database = _xapian_database(endpoints, writable, False, data=self.data, log=self.log)
+            self.database = database
 
-        return self.database
+        return database
 
     def index(self, document, commit=False):
         database = self.database
