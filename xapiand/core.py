@@ -492,6 +492,8 @@ tcpservers = TcpPool()
 
 class Database(object):
     def __init__(self, endpoints, writable, create, data='.', log=logging):
+        self.writable = writable
+        self.create = create
         self.data = data
         self.log = log
         self.database = _xapian_database(endpoints, writable, create, data=data, log=log)
@@ -508,10 +510,9 @@ class Database(object):
 
         # Could not be opened, try full reopen:
         endpoints = database._endpoints
-        writable = isinstance(database, xapian.WritableDatabase)
 
         # Remove database from pool
-        _database = subdatabases.pop((writable, endpoints), None)
+        _database = subdatabases.pop((self.writable, endpoints), None)
         assert not _database or _database == database
         # ...and close.
         if database:
@@ -549,8 +550,7 @@ class Database(object):
         if force:
             self.close()
             endpoints = database._endpoints
-            writable = isinstance(database, xapian.WritableDatabase)
-            database = _xapian_database(endpoints, writable, False, data=self.data, log=self.log)
+            database = _xapian_database(endpoints, self.writable, self.create, data=self.data, log=self.log)
             self.database = database
 
         return database
