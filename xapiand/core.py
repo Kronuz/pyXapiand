@@ -534,7 +534,7 @@ class Database(object):
         database._closed = True
         self.log.debug("Database %s: %s", "closed", database._db)
 
-    def reopen(self):
+    def reopen(self, force=False):
         database = self.database
         try:
             if database._closed:
@@ -544,7 +544,9 @@ class Database(object):
         except (xapian.NetworkError, xapian.DatabaseError) as exc:
             # Could not be opened, try full reopen:
             self.log.error("xapian_reopen database: %s", exc)
+            force = True
 
+        if force:
             self.close()
             endpoints = database._endpoints
             writable = isinstance(database, xapian.WritableDatabase)
@@ -637,143 +639,106 @@ class Database(object):
 
         return self.replace(document_id, document)
 
-    def replace(self, document_id, document, commit=False):
+    def replace(self, document_id, document, commit=False, _t=0):
         database = self.database
         try:
             docid = database.replace_document(document_id, document)
         except xapian.InvalidArgumentError as exc:
             self.log.error("%s", exc)
-        except (xapian.NetworkError, xapian.DatabaseError):
-            try:
-                _database = self.reopen()
-                if database != _database:
-                    database = _database
-                docid = database.replace_document(document_id, document)
-            except xapian.InvalidArgumentError as exc:
-                self.log.error("%s", exc)
-            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            if _t > 1:
                 raise XapianError(exc)
+            self.reopen(_t)
+            return self.replace(document_id, document, commit=commit, _t=_t + 1)
         if commit:
             database = self.commit()
         return docid
 
-    def delete(self, document_id, commit=False, data='.', log=logging):
+    def delete(self, document_id, commit=False, data='.', log=logging, _t=0):
         database = self.database
         try:
             database.delete_document(document_id)
-        except (xapian.NetworkError, xapian.DatabaseError):
-            try:
-                _database = self.reopen()
-                if database != _database:
-                    database = _database
-                database.delete_document(document_id)
-            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            if _t > 1:
                 raise XapianError(exc)
+            self.reopen(_t)
+            return self.delete(document_id, commit=commit, data=data, log=log, _t=_t + 1)
         if commit:
             database = self.commit()
 
-    def commit(self):
+    def commit(self, _t=0):
         database = self.database
         try:
             database.commit()
-        except (xapian.NetworkError, xapian.DatabaseError):
-            try:
-                _database = self.reopen()
-                if database != _database:
-                    database = _database
-                database.commit()
-            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            if _t > 1:
                 raise XapianError(exc)
+            self.reopen(_t)
+            return self.commit(_t=_t + 1)
 
-    def get_uuid(self):
+    def get_uuid(self, _t=0):
         database = self.database
         try:
             uuid = database.get_uuid()
-        except (xapian.NetworkError, xapian.DatabaseError):
-            try:
-                _database = self.reopen()
-                if _database != database:
-                    database = _database
-                uuid = database.get_uuid()
-            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            if _t > 1:
                 raise XapianError(exc)
+            self.reopen(_t)
+            return self.get_uuid(_t=_t + 1)
         return uuid
 
-    def get_doccount(self):
+    def get_doccount(self, _t=0):
         database = self.database
         try:
             doccount = database.get_doccount()
-        except (xapian.NetworkError, xapian.DatabaseError):
-            try:
-                _database = self.reopen()
-                if _database != database:
-                    database = _database
-                doccount = database.get_doccount()
-            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            if _t > 1:
                 raise XapianError(exc)
+            self.reopen(_t)
+            return self.get_doccount(_t=_t + 1)
         return doccount
 
-    def get_document(self, docid):
+    def get_document(self, docid, _t=0):
         database = self.database
         try:
             document = database.get_document(docid)
-        except (xapian.NetworkError, xapian.DatabaseError):
-            try:
-                _database = self.reopen()
-                if _database != database:
-                    database = _database
-                document = database.get_document(docid)
-            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            if _t > 1:
                 raise XapianError(exc)
+            self.reopen(_t)
+            return self.get_document(docid, _t=_t + 1)
         return document
 
-    def get_value(self, document, slot):
-        database = self.database
+    def get_value(self, document, slot, _t=0):
         try:
             value = document.get_value(slot)
-        except (xapian.NetworkError, xapian.DatabaseError):
-            try:
-                _database = self.reopen()
-                if _database != database:
-                    database = _database
-                    document = database.get_document(document.get_docid())
-                value = document.get_value(slot)
-            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            if _t > 1:
                 raise XapianError(exc)
+            self.reopen(_t)
+            return self.get_value(document, slot, _t=_t + 1)
         return value
 
-    def get_data(self, document):
-        database = self.database
+    def get_data(self, document, _t=0):
         try:
             _data = document.get_data()
         except xapian.DocNotFoundError:
             return
-        except (xapian.NetworkError, xapian.DatabaseError):
-            try:
-                _database = self.reopen()
-                if _database != database:
-                    database = _database
-                    document = database.get_document(document.get_docid())
-                _data = document.get_data()
-            except xapian.DocNotFoundError:
-                return
-            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            if _t > 1:
                 raise XapianError(exc)
+            self.reopen(_t)
+            return self.get_data(document, _t=_t + 1)
         return _data
 
-    def get_termlist(self, document):
-        database = self.database
+    def get_termlist(self, document, _t=0):
         try:
             termlist = document.termlist()
-        except (xapian.NetworkError, xapian.DatabaseError):
-            try:
-                _database = self.reopen()
-                if _database != database:
-                    database = _database
-                    document = database.get_document(document.get_docid())
-                termlist = document.termlist()
-            except (xapian.NetworkError, xapian.DatabaseError) as exc:
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            if _t > 1:
                 raise XapianError(exc)
+            self.reopen(_t)
+            return self.get_termlist(document, _t=_t + 1)
         return termlist
 
 
