@@ -72,7 +72,7 @@ class XapiandReceiver(CommandReceiver):
             self._reopen()
             self.sendLine(">> OK")
         except InvalidIndexError as exc:
-            self.sendLine(">> ERR: [500] REOPEN: %s" % exc)
+            self.sendLine(">> ERR: [409] REOPEN: %s" % exc)
 
     @command
     def create(self, line=''):
@@ -90,7 +90,7 @@ class XapiandReceiver(CommandReceiver):
                 self._reopen(endpoints=endpoints)
                 self.active_endpoints = endpoints
             except InvalidIndexError as exc:
-                self.sendLine(">> ERR: [500] CREATE: %s" % exc)
+                self.sendLine(">> ERR: [409] CREATE: %s" % exc)
             self.sendLine(">> OK")
         else:
             self.sendLine(">> ERR: [405] You must specify a valid endpoint for the database")
@@ -116,7 +116,7 @@ class XapiandReceiver(CommandReceiver):
                 self._reopen(endpoints=endpoints)
                 self.active_endpoints = endpoints
             except InvalidIndexError as exc:
-                self.sendLine(">> ERR: [500] OPEN: %s" % exc)
+                self.sendLine(">> ERR: [409] OPEN: %s" % exc)
                 return
         if self.active_endpoints:
             self.sendLine(">> OK")
@@ -143,7 +143,7 @@ class XapiandReceiver(CommandReceiver):
                 self._reopen(endpoints=endpoints)
                 self.active_endpoints = endpoints
             except InvalidIndexError as exc:
-                self.sendLine(">> ERR: [500] USING: %s" % exc)
+                self.sendLine(">> ERR: [409] USING: %s" % exc)
                 return
         if self.active_endpoints:
             self.sendLine(">> OK")
@@ -175,6 +175,7 @@ class XapiandReceiver(CommandReceiver):
                         for result in search.results:
                             self.sendLine(json.dumps(result, ensure_ascii=False))
                     except XapianError as exc:
+                        self.log.error("%s", exc, exc_info=True)
                         self.sendLine(">> ERR: [500] Unable to get results: %s" % exc)
                         return
 
@@ -187,7 +188,7 @@ class XapiandReceiver(CommandReceiver):
                 self.sendLine(">> OK: %s documents found in %s" % (size, format_time(time.time() - start)))
                 return size
         except InvalidIndexError as exc:
-            self.sendLine(">> ERR: [500] %s" % exc)
+            self.sendLine(">> ERR: [409] %s" % exc)
             return
 
     @command(threaded=True, db=True, reopen=True)
@@ -253,7 +254,7 @@ class XapiandReceiver(CommandReceiver):
                 self.sendLine(">> OK: %s documents found in %s" % (size, format_time(time.time() - start)))
                 return size
         except InvalidIndexError as exc:
-            self.sendLine(">> ERR: [500] COUNT: %s" % exc)
+            self.sendLine(">> ERR: [409] COUNT: %s" % exc)
     count.__doc__ = """
     Counts matching documents.
 
