@@ -262,10 +262,11 @@ class Connection(object):
                     if response[0] in (b"#", b" "):
                         continue
                     try:
-                        _cmd_id, _, response = response.partition(b'. ')
+                        _cmd_id, response = response.split(b'. ', 1)
+                        _cmd_id = int(_cmd_id)
                     except ValueError:
-                        continue
-                    _cmd_id = int(_cmd_id)
+                        self.disconnect()
+                        raise ConnectionError("Received a wrong response from the server: %r" % response)
                     if _cmd_id != cmd_id:
                         if _cmd_id < cmd_id:
                             continue
