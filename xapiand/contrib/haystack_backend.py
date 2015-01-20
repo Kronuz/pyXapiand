@@ -71,6 +71,13 @@ class XapianSearchBackend(BaseSearchBackend):
         return self._xapian(*args, **kwargs)
 
     def updater(self, index, obj, commit):
+        if not obj.pk:
+            return
+
+        endpoints = self.endpoints.for_write(instance=obj)
+        if not endpoints:
+            return
+
         data = index.full_prepare(obj)
         weights = index.get_field_weights()
 
@@ -159,7 +166,6 @@ class XapianSearchBackend(BaseSearchBackend):
         term_prefix = get_prefix(DJANGO_CT.upper(), DOCUMENT_CUSTOM_TERM_PREFIX)
         document_terms.append(dict(term=get_model_ct(obj), weight=0, prefix=term_prefix))
 
-        endpoints = self.endpoints.for_write(instance=obj)
         document_id = get_identifier(obj)
 
         def callback(xapian):
