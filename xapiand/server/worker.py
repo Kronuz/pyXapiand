@@ -13,6 +13,7 @@ from gevent import queue
 from gevent.lock import Semaphore
 from gevent.threadpool import ThreadPool
 
+import xapian
 from .. import version
 from ..core import DatabasesPool, xapian_cleanup, DATABASE_MAX_LIFE
 from ..utils import parse_url, build_url, format_time
@@ -241,7 +242,7 @@ def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask
 
     queue_class = AVAILABLE_QUEUES.get(queue_type) or AVAILABLE_QUEUES['default']
     mode = "with multiple threads and %s commit slots using %s" % (commit_slots, queue_class.__name__)
-    log.warning("Starting Xapiand Server v%s %s [%s] (pid:%s)", version, mode, loglevel, os.getpid())
+    log.warning("Starting Xapiand Server v%s (xapian v%s) %s [%s] (pid:%s)", version, xapian.__version__, mode, loglevel, os.getpid())
 
     commit_lock = Semaphore(commit_slots)
     timeouts = Obj(

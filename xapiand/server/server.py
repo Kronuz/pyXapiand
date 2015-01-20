@@ -42,7 +42,8 @@ class XapiandReceiver(CommandReceiver):
 
     def _reopen(self, endpoints=None):
         endpoints = endpoints or self.active_endpoints
-        self._do_init.add(endpoints)
+        if endpoints:
+            self._do_init.add(endpoints)
         self._do_reopen = True
 
     @command
