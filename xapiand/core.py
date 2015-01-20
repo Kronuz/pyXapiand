@@ -33,12 +33,16 @@ KEY_RE = re.compile(r'[_a-zA-Z][_a-zA-Z0-9]*')
 PREFIX_RE = re.compile(r'(?:([_a-zA-Z][_a-zA-Z0-9]*):)?("[-\w.]+"|[-\w.]+)')
 TERM_SPLIT_RE = re.compile(r'[^-\w.]')
 
-XAPIAN_PREFER_BRASS = True
+XAPIAN_PREFER_GLASS = True
 XAPIAN_TCPSRV = '/usr/local/bin/xapian-tcpsrv-1.3'
-if XAPIAN_PREFER_BRASS:
-    os.environ['XAPIAN_PREFER_BRASS'] = '1'
-elif 'XAPIAN_PREFER_BRASS' in os.environ:
-    del os.environ['XAPIAN_PREFER_BRASS']
+if XAPIAN_PREFER_GLASS:
+    os.environ['XAPIAN_PREFER_GLASS'] = '1'
+    os.environ['XAPIAN_PREFER_BRASS'] = '1'  # TODO: remove old BRASS here
+else:
+    if 'XAPIAN_PREFER_GLASS' in os.environ:
+        del os.environ['XAPIAN_PREFER_GLASS']
+    if 'XAPIAN_PREFER_BRASS' in os.environ:  # TODO: remove old BRASS here
+        del os.environ['XAPIAN_PREFER_BRASS']
 
 
 def find_terms(value, field=None):
