@@ -654,7 +654,7 @@ class Database(object):
                 raise XapianError(exc)
             elif _t > 1:
                 gevent.sleep(0.1)
-            self.reopen(_t)
+            self.reopen(_t > 1)
             return self.replace(document_id, document, commit=commit, _t=_t + 1)
         if commit:
             database = self.commit()
@@ -669,7 +669,7 @@ class Database(object):
                 raise XapianError(exc)
             elif _t > 1:
                 gevent.sleep(0.1)
-            self.reopen(_t)
+            self.reopen(_t > 1)
             return self.delete(document_id, commit=commit, data=data, log=log, _t=_t + 1)
         if commit:
             database = self.commit()
@@ -683,7 +683,7 @@ class Database(object):
                 raise XapianError(exc)
             elif _t > 1:
                 gevent.sleep(0.1)
-            self.reopen(_t)
+            self.reopen(_t > 1)
             return self.commit(_t=_t + 1)
 
     def get_uuid(self, _t=0):
@@ -695,7 +695,7 @@ class Database(object):
                 raise XapianError(exc)
             elif _t > 1:
                 gevent.sleep(0.1)
-            self.reopen(_t)
+            self.reopen(_t > 1)
             return self.get_uuid(_t=_t + 1)
         return uuid
 
@@ -708,7 +708,7 @@ class Database(object):
                 raise XapianError(exc)
             elif _t > 1:
                 gevent.sleep(0.1)
-            self.reopen(_t)
+            self.reopen(_t > 1)
             return self.get_doccount(_t=_t + 1)
         return doccount
 
@@ -721,11 +721,12 @@ class Database(object):
                 raise XapianError(exc)
             elif _t > 1:
                 gevent.sleep(0.1)
-            self.reopen(_t)
+            self.reopen(_t > 1)
             return self.get_document(docid, _t=_t + 1)
         return document
 
     def get_value(self, document, slot, _t=0):
+        database = self.database
         try:
             value = document.get_value(slot)
         except (xapian.NetworkError, xapian.DatabaseError) as exc:
@@ -733,11 +734,13 @@ class Database(object):
                 raise XapianError(exc)
             elif _t > 1:
                 gevent.sleep(0.1)
-            self.reopen(_t)
+            if self.reopen(_t > 1) != database:
+                document = self.get_document(document.get_docid())
             return self.get_value(document, slot, _t=_t + 1)
         return value
 
     def get_data(self, document, _t=0):
+        database = self.database
         try:
             _data = document.get_data()
         except xapian.DocNotFoundError:
@@ -747,11 +750,13 @@ class Database(object):
                 raise XapianError(exc)
             elif _t > 1:
                 gevent.sleep(0.1)
-            self.reopen(_t)
+            if self.reopen(_t > 1) != database:
+                document = self.get_document(document.get_docid())
             return self.get_data(document, _t=_t + 1)
         return _data
 
     def get_termlist(self, document, _t=0):
+        database = self.database
         try:
             termlist = document.termlist()
         except (xapian.NetworkError, xapian.DatabaseError) as exc:
@@ -759,7 +764,8 @@ class Database(object):
                 raise XapianError(exc)
             elif _t > 1:
                 gevent.sleep(0.1)
-            self.reopen(_t)
+            if self.reopen(_t > 1) != database:
+                document = self.get_document(document.get_docid())
             return self.get_termlist(document, _t=_t + 1)
         return termlist
 
