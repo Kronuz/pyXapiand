@@ -1,4 +1,4 @@
-from __future__ import absolute_import, unicode_literals
+from __future__ import absolute_import, unicode_literals, print_function
 
 import sys
 import time
@@ -230,7 +230,7 @@ class Connection(object):
         if not self.client_socket:
             self.connect()
             raise NewConnection("New connection made!")
-        # print '<<<<---', id(self), '%s:%s' % (self.address[0], self.address[1]), repr(body)
+        # print('<<<<---', id(self), '%s:%s' % (self.address[0], self.address[1]), repr(body), file=sys.stderr)
         try:
             self.socket_file.write(body)
             self.socket_file.flush()
@@ -257,7 +257,7 @@ class Connection(object):
                     self.disconnect()
                     raise ConnectionError("No response!")
                 response = response[:-2]
-                # print '--->>>>', id(self), '%s:%s' % (self.address[0], self.address[1]), repr(response)
+                # print('--->>>>', id(self), '%s:%s' % (self.address[0], self.address[1]), repr(response), file=sys.stderr)
                 if response:
                     if response[0] in (b"#", b" "):
                         continue
