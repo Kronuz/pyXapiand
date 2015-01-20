@@ -215,16 +215,19 @@ class Connection(object):
         "Disconnects from the server"
         self.on_disconnect()
         self.cmd_id = 0
-        if self.socket_file is not None:
-            self.socket_file.close()
-            self.socket_file = None
-        if self.client_socket is not None:
+        socket_file, self.socket_file = self.socket_file, None
+        client_socket, self.client_socket = self.client_socket, None
+        if socket_file is not None:
             try:
-                self.client_socket.shutdown(socket.SHUT_RDWR)
-                self.client_socket.close()
+                socket_file.close()
             except socket.error:
                 pass
-            self.client_socket = None
+        if client_socket is not None:
+            try:
+                client_socket.shutdown(socket.SHUT_RDWR)
+                client_socket.close()
+            except socket.error:
+                pass
 
     def send(self, body):
         if not self.client_socket:
