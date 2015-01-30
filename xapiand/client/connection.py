@@ -12,6 +12,7 @@ from functools import wraps
 
 from ..parser import SPLIT_RE
 from ..exceptions import ConnectionError, NewConnection
+from ..utils import sendall, readline
 
 
 # Sentinel used to mark an empty slot in the ConnectionPool queue.
@@ -146,7 +147,6 @@ class Connection(object):
         self.encoding = encoding
         self.encoding_errors = encoding_errors
         self.client_socket = None
-        self.socket_file = None
         self.cmd_id = 0
 
     def __del__(self):
@@ -171,6 +171,13 @@ class Connection(object):
     def on_disconnect(self):
         pass
 
+    @property
+    def client_responses(self):
+        if not hasattr(self, '_client_responses') or getattr(self, '_client_responses_socket', None) != self.client_socket:
+            self._client_responses_socket = self.client_socket
+            self._client_responses = readline(self._client_responses_socket)
+        return self._client_responses
+
     def connect(self):
         if not self.client_socket:
             try:
@@ -180,8 +187,6 @@ class Connection(object):
                 e = exc_info[1]
                 raise ConnectionError(self._error_message(e)), None, exc_info[2]
             self.client_socket = sock
-        if not self.socket_file:
-            self.socket_file = self.client_socket.makefile()
         self.cmd_id = 0
         self.on_connect()
 
@@ -215,13 +220,7 @@ class Connection(object):
         "Disconnects from the server"
         self.on_disconnect()
         self.cmd_id = 0
-        socket_file, self.socket_file = self.socket_file, None
         client_socket, self.client_socket = self.client_socket, None
-        if socket_file is not None:
-            try:
-                socket_file.close()
-            except socket.error:
-                pass
         if client_socket is not None:
             try:
                 client_socket.shutdown(socket.SHUT_RDWR)
@@ -235,8 +234,7 @@ class Connection(object):
             raise NewConnection("New connection made!")
         # print('<<<<---', id(self), '%s:%s' % (self.address[0], self.address[1]), repr(body), file=sys.stderr)
         try:
-            self.socket_file.write(body)
-            self.socket_file.flush()
+            sendall(self.client_socket, body)
         except socket.error:
             self.disconnect()
             exc_info = sys.exc_info()
@@ -253,35 +251,29 @@ class Connection(object):
     def read(self):
         "Read the response from a previously sent command"
         cmd_id = self.cmd_id
-        while True:
-            try:
-                response = self.socket_file.readline()
-                if not response:
-                    self.disconnect()
-                    raise ConnectionError("No response!")
-                response = response[:-2]
-                # print('--->>>>', id(self), '%s:%s' % (self.address[0], self.address[1]), repr(response), file=sys.stderr)
-                if response:
-                    if response[0] in (b"#", b" "):
-                        continue
-                    try:
-                        _cmd_id, response = response.split(b'. ', 1)
-                        _cmd_id = int(_cmd_id)
-                    except ValueError:
-                        self.disconnect()
-                        raise ConnectionError("Received a wrong response from the server: %r" % response)
-                    if _cmd_id != cmd_id:
-                        if _cmd_id < cmd_id:
-                            continue
-                        self.disconnect()
-                        raise ConnectionError("Old command handler read a newer message sequence!")
-                    response = response.decode(self.encoding, self.encoding_errors)
-                return response
-            except (socket.error, socket.timeout):
+        for response in self.client_responses:
+            if not response:
                 self.disconnect()
-                exc_info = sys.exc_info()
-                e = exc_info[1]
-                raise ConnectionError("Error while reading from socket: %s" % (e.args,)), None, exc_info[2]
+                raise ConnectionError("No response!")
+            response = response[:-2]
+            # print('--->>>>', id(self), '%s:%s' % (self.address[0], self.address[1]), repr(response), file=sys.stderr)
+            if response:
+                if response[0] in (b"#", b" "):
+                    continue
+                try:
+                    _cmd_id, response = response.split(b'. ', 1)
+                    _cmd_id = int(_cmd_id)
+                except ValueError:
+                    self.disconnect()
+                    raise ConnectionError("Received a wrong response from the server: %r" % response)
+                if _cmd_id != cmd_id:
+                    if _cmd_id < cmd_id:
+                        continue
+                    self.disconnect()
+                    raise ConnectionError("Old command handler read a newer message sequence!")
+                response = response
+                break
+        return response
 
     def pack_command(self, *args):
         return "%s%s" % (" ".join(a for a in args if a), self.delimiter)
@@ -290,7 +282,7 @@ class Connection(object):
     def execute_command(self, command_name, *args):
         self.cmd_id += 1
         command = self.pack_command(command_name, *args)
-        self.send(command.encode(self.encoding, self.encoding_errors))
+        self.send(command)
         return self.read()
 
     @property

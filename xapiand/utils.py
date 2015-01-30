@@ -1,6 +1,7 @@
 from __future__ import unicode_literals, absolute_import, division
 
 import re
+import socket
 import datetime
 
 try:
@@ -156,3 +157,34 @@ def format_time(timespan, precision=3):
         order = 3
     ret = "%.*g %s" % (precision, timespan * scaling[order], units[order])
     return ret
+
+
+def sendall(client_socket, string, encoding='utf-8', encoding_errors='strict'):
+    client_socket.sendall(string.encode(encoding, encoding_errors))
+
+
+def readline(client_socket, bufsize=4096, encoding='utf-8', encoding_errors='strict'):
+    try:
+        buf = client_socket.recv(bufsize)
+    except (socket.error, socket.timeout):
+        yield ""
+        return
+
+    done = False
+    while not done:
+        if b"\n" in buf:
+            line, buf = buf.split(b"\n", 1)
+            line += b"\n"
+            yield line.decode(encoding, encoding_errors)
+        else:
+            try:
+                more = client_socket.recv(bufsize)
+            except (socket.error, socket.timeout):
+                break
+            if not more:
+                done = True
+            else:
+                buf = buf + more
+    if buf:
+        yield buf.decode(encoding, encoding_errors)
+    yield ""

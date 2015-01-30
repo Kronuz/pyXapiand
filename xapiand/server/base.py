@@ -1,4 +1,4 @@
-from __future__ import unicode_literals, absolute_import
+from __future__ import unicode_literals, absolute_import, print_function
 
 import time
 import logging
@@ -11,7 +11,7 @@ from functools import wraps
 from gevent import socket
 from gevent.server import StreamServer
 from gevent.threadpool import ThreadPool
-from ..utils import format_time
+from ..utils import format_time, sendall, readline
 
 
 class QuitCommand(Exception):
@@ -93,7 +93,6 @@ def command(threaded=False, **kwargs):
                 client_socket = socket.socket(_sock=client_socket._sock)
 
                 self.client_socket = client_socket
-                self.socket_file = client_socket.makefile()
                 try:
                     command.executed(func(self, *args, **kwargs))
                 except (IOError, RuntimeError, socket.error) as e:
@@ -119,7 +118,6 @@ class ClientReceiver(object):
         self.address = address
         self.local = threading.local()
         self.client_socket = client_socket
-        self.socket_file = client_socket.makefile()
         self.closed = False
         self.encoding = encoding
         self.encoding_errors = encoding_errors
@@ -146,28 +144,14 @@ class ClientReceiver(object):
     def client_socket(self, value):
         self.local.client_socket = value
 
-    @property
-    def socket_file(self):
-        return self.local.socket_file
-
-    @socket_file.setter
-    def socket_file(self, value):
-        self.local.socket_file = value
-
-    def readline(self):
-        try:
-            return self.socket_file.readline()
-        except socket.error:
-            pass
-
     def handle(self):
-        line = self.readline()
-        while line and not self.closed:
+        for line in readline(self.client_socket, encoding=self.encoding, encoding_errors=self.encoding_errors):
+            if not line or self.closed:
+                break
             try:
                 self.lineReceived(line)
             except QuitCommand:
                 break
-            line = self.readline()
 
     def dispatch(self, func, line, command):
         if func.threaded:
@@ -198,8 +182,7 @@ class ClientReceiver(object):
         line += self.delimiter
         if line[0] not in ("#", " "):
             line = "%s. %s" % (self.cmd_id, line)
-        self.socket_file.write(line.encode(self.encoding, self.encoding_errors))
-        self.socket_file.flush()
+        sendall(self.client_socket, line, encoding=self.encoding, encoding_errors=self.encoding_errors)
 
     def lineReceived(self, line):
         self.activity = time.time()
@@ -274,7 +257,6 @@ class CommandReceiver(ClientReceiver):
 
     def lineReceived(self, line):
         super(CommandReceiver, self).lineReceived(line)
-        line = line.decode(self.encoding, self.encoding_errors)
         cmd, _, line = line.partition(' ')
         cmd = cmd.strip().lower()
         line = line.strip()

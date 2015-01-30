@@ -1,4 +1,4 @@
-from __future__ import absolute_import, unicode_literals
+from __future__ import absolute_import, unicode_literals, print_function
 
 import os
 import re
@@ -641,7 +641,7 @@ class Database(object):
                 index_text = term_generator.index_text_without_positions
             index_text(normalize(text), weight, prefix.upper())
 
-        return self.replace(document_id, document)
+        return self.replace(document_id, document, commit=commit)
 
     def replace(self, document_id, document, commit=False, _t=0):
         database = self.database
@@ -660,7 +660,12 @@ class Database(object):
             database = self.commit()
         return docid
 
-    def delete(self, document_id, commit=False, data='.', log=logging, _t=0):
+    def delete(self, document_id, commit=False):
+        if isinstance(document_id, basestring):
+            document_id = prefixed(document_id, DOCUMENT_ID_TERM_PREFIX)
+        return self.drop(document_id, commit=commit)
+
+    def drop(self, document_id, commit=False, _t=0):
         database = self.database
         try:
             database.delete_document(document_id)
@@ -670,7 +675,7 @@ class Database(object):
             elif _t > 1:
                 gevent.sleep(0.1)
             self.reopen(_t > 1)
-            return self.delete(document_id, commit=commit, data=data, log=log, _t=_t + 1)
+            return self.drop(document_id, commit=commit, _t=_t + 1)
         if commit:
             database = self.commit()
 

@@ -65,17 +65,18 @@ class XapianConnection(Connection):
             self._response(self.execute_command('USING'))
 
     def _response(self, line):
-        if line.startswith(">>"):
+        if line.startswith(">> "):
             if line.startswith(">> OK"):
-                return line[7:] or None
+                return line[7:]
             if line.startswith(">> ERR"):
                 raise XapianError(line[8:])
+            return line[3:]
 
     def _search(self, cmd, **query):
         line = self.execute_command(cmd, dumps(query, ensure_ascii=False))
         while line:
             response = self._response(line)
-            if response:
+            if response is not None:
                 break
             yield json.loads(line)
             line = self.read()

@@ -31,7 +31,13 @@ DOCUMENT_AC_FIELD = 'ac'
 
 class XapianSearchResults(XapianResults):
     def get_data(self, result):
-        app_label, module_name, pk, model_data = pickle.loads(result['data'].encode('utf-8'))
+        data = result['data']
+        if data and data[0] == '(':
+            # FIXME: Legacy data was not in base64 (REMOVE!)
+            data = data.encode('utf-8')
+        else:
+            data = data.decode('base64')
+        app_label, module_name, pk, model_data = pickle.loads(data)
         return SearchResult(app_label, module_name, pk, result['weight'], **model_data)
 
 
@@ -161,7 +167,7 @@ class XapianSearchBackend(BaseSearchBackend):
                     if field_name == self.content_field_name:
                         pass
 
-        document_data = pickle.dumps((obj._meta.app_label, obj._meta.module_name, obj.pk, data))
+        document_data = pickle.dumps((obj._meta.app_label, obj._meta.module_name, obj.pk, data), protocol=pickle.HIGHEST_PROTOCOL).encode('base64')
 
         term_prefix = get_prefix(DJANGO_CT.upper(), DOCUMENT_CUSTOM_TERM_PREFIX)
         document_terms.append(dict(term=get_model_ct(obj), weight=0, prefix=term_prefix))
