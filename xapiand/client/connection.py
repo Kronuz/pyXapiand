@@ -101,6 +101,7 @@ class ConnectionPool(object):
         # Push an empty slot instead so that it will be refreshed when needed.
         now = time.time()
         if self.max_age is None or now - ts < self.max_age:
+            connection.clean()  # clean connection (so next one using gets it clean)
             self.clients.put((ts, connection))
         else:
             if self.maxsize is not None:
@@ -164,6 +165,10 @@ class Connection(object):
         else:
             return "Error %s connecting %s:%s. %s." % \
                 (exception.args[0], self.host, self.port, exception.args[1])
+
+    def clean(self):
+        self._client_responses_socket = None
+        self.cmd_id += 1
 
     def on_connect(self):
         pass
