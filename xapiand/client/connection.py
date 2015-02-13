@@ -48,7 +48,7 @@ class ConnectionPool(object):
     def factory(self):
         return self.server().factory()
 
-    def reserve(self):
+    def checkout(self):
         ts, connection = self._checkout_connection()
         connection._checkout = (self, ts)
         return connection
@@ -96,7 +96,7 @@ class ConnectionPool(object):
         # If the connection is now stale, don't return it to the pool.
         # Push an empty slot instead so that it will be refreshed when needed.
         now = time.time()
-        if self.client_socket and (self.max_age is None or now - ts < self.max_age):
+        if connection.client_socket and (self.max_age is None or now - ts < self.max_age):
             self.clients.put((ts, connection))
         else:
             if self.maxsize is not None:
@@ -153,8 +153,8 @@ class Connection(object):
             pass
 
     def checkin(self):
-        if self.checkout:
-            pool, ts = self.checkout
+        if self._checkout:
+            pool, ts = self._checkout
             self._checkout = None
             self._client_responses_socket = None
             # self.cmd_id += 1
@@ -403,16 +403,21 @@ class ServerPool(object):
         else:
             raise socket.timeout("No server left in the pool")
 
-    def reserve(self):
-        return self._pool.reserve()
+    def checkout(self):
+        return self._pool.checkout()
 
-    def __call__(self, callback, *args, **kwargs):
+    @contextlib.contextmanager
+    def connection(self):
         """Context-manager to obtain a Client object from the pool."""
-        connection = self.reserve()
+        connection = self.checkout()
         try:
-            return callback(connection, *args, **kwargs)
+            yield connection
         finally:
             connection.checkin()
+
+    def __call__(self, callback, *args, **kwargs):
+        with self.connection as connection:
+            return callback(connection, *args, **kwargs)
 
     def call(self, name, *args, **kwargs):
         def callback(connection):
