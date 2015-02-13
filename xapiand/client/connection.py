@@ -48,16 +48,12 @@ class ConnectionPool(object):
     def factory(self):
         return self.server().factory()
 
-    @contextlib.contextmanager
-    def reserve(self, *args, **kwargs):
-        """Context-manager to obtain a Client object from the pool."""
-        ts, connection = self._checkout_connection(*args, **kwargs)
-        try:
-            yield connection
-        finally:
-            self._checkin_connection(ts, connection)
+    def reserve(self):
+        ts, connection = self._checkout_connection()
+        connection._checkout = (self, ts)
+        return connection
 
-    def _checkout_connection(self, *args, **kwargs):
+    def _checkout_connection(self):
         # If there's no maxsize, no need to block waiting for a connection.
         blocking = self.maxsize is not None
         # Loop until we get a non-stale connection, or we create a new one.
@@ -100,8 +96,7 @@ class ConnectionPool(object):
         # If the connection is now stale, don't return it to the pool.
         # Push an empty slot instead so that it will be refreshed when needed.
         now = time.time()
-        if self.max_age is None or now - ts < self.max_age:
-            connection.clean()  # clean connection (so next one using gets it clean)
+        if self.client_socket and (self.max_age is None or now - ts < self.max_age):
             self.clients.put((ts, connection))
         else:
             if self.maxsize is not None:
@@ -153,8 +148,17 @@ class Connection(object):
     def __del__(self):
         try:
             self.disconnect()
+            self.checkin()
         except Exception:
             pass
+
+    def checkin(self):
+        if self.checkout:
+            pool, ts = self.checkout
+            self._checkout = None
+            self._client_responses_socket = None
+            # self.cmd_id += 1
+            pool._checkin_connection(ts, self)
 
     def _error_message(self, exception):
         # args for socket.error can either be (errno, "message")
@@ -165,10 +169,6 @@ class Connection(object):
         else:
             return "Error %s connecting %s:%s. %s." % \
                 (exception.args[0], self.host, self.port, exception.args[1])
-
-    def clean(self):
-        self._client_responses_socket = None
-        self.cmd_id += 1
 
     def on_connect(self):
         pass
@@ -403,14 +403,16 @@ class ServerPool(object):
         else:
             raise socket.timeout("No server left in the pool")
 
-    @property
-    def connection(self):
+    def reserve(self):
         return self._pool.reserve()
 
     def __call__(self, callback, *args, **kwargs):
         """Context-manager to obtain a Client object from the pool."""
-        with self.connection as connection:
-            return callback(connection)
+        connection = self.reserve()
+        try:
+            return callback(connection, *args, **kwargs)
+        finally:
+            connection.checkin()
 
     def call(self, name, *args, **kwargs):
         def callback(connection):
