@@ -250,14 +250,14 @@ class XapianSearchBackend(BaseSearchBackend):
         connection = self.xapian.checkout()
         connection.using(endpoints)
         results = connection.search(
-                query_string,
-                offset=offset,
-                limit=limit,
-                results_class=XapianSearchResults,
-                ranges=ranges,
-                terms=terms,
-                partials=partials,
-            )
+            query_string,
+            offset=offset,
+            limit=limit,
+            results_class=XapianSearchResults,
+            ranges=ranges,
+            terms=terms,
+            partials=partials,
+        )
 
         for facet in results.facets:
             facets['fields'][facet['name']] = (facet['term'], facet['termfreq'])
