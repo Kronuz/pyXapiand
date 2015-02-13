@@ -247,9 +247,9 @@ class XapianSearchBackend(BaseSearchBackend):
         hints = hints or {}
         endpoints = self.endpoints.for_read(models=models, **hints)
 
-        def callback(xapian):
-            xapian.using(endpoints)
-            return xapian.search(
+        connection = self.xapian.checkout()
+        connection.using(endpoints)
+        results = connection.search(
                 query_string,
                 offset=offset,
                 limit=limit,
@@ -258,7 +258,6 @@ class XapianSearchBackend(BaseSearchBackend):
                 terms=terms,
                 partials=partials,
             )
-        results = self.xapian(callback)
 
         for facet in results.facets:
             facets['fields'][facet['name']] = (facet['term'], facet['termfreq'])
