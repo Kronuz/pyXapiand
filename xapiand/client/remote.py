@@ -101,7 +101,7 @@ class XapianConnection(Connection):
         query['maxitems'] = 0
         query.pop('sort_by', None)
         results = self._search('FACETS', **query)
-        return results_class(results)
+        return results_class(self, results)
 
     @command
     def terms(self, search=None, terms=None, ranges=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
@@ -120,7 +120,7 @@ class XapianConnection(Connection):
         if order_by is not None:
             query['sort_by'] = order_by
         results = self._search('TERMS', **query)
-        return results_class(results)
+        return results_class(self, results)
 
     @command
     def find(self, search=None, facets=None, terms=None, ranges=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
@@ -140,7 +140,7 @@ class XapianConnection(Connection):
         if order_by is not None:
             query['sort_by'] = order_by
         results = self._search('FIND', **query)
-        return results_class(results)
+        return results_class(self, results)
 
     @command
     def search(self, search=None, facets=None, terms=None, ranges=None, partials=None, offset=None, limit=None, order_by=None, results_class=XapianResults):
@@ -160,7 +160,7 @@ class XapianConnection(Connection):
         if order_by is not None:
             query['sort_by'] = order_by
         results = self._search('SEARCH', **query)
-        return results_class(results)
+        return results_class(self, results)
 
     @command
     def count(self, search=None, terms=None, ranges=None, partials=None):
