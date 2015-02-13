@@ -322,13 +322,12 @@ class ServerPool(object):
     connection_class = Connection
 
     def __init__(self, servers, max_pool_size=35, blacklist_time=60,
-                 wait_for_connection=None, max_age=60, max_retries=3,
+                 wait_for_connection=None, max_age=60,
                  max_connect_retries=2, reconnect_delay=0.1,
                  socket_timeout=4, socket_class=socket.socket, sleep=time.sleep,
                  encoding='utf-8', encoding_errors='strict'):
         self.socket_class = socket_class
         self.sleep = sleep
-        self.max_retries = max_retries
         self.max_connect_retries = max_connect_retries
         self.reconnect_delay = reconnect_delay
         self.socket_timeout = socket_timeout
@@ -404,17 +403,14 @@ class ServerPool(object):
         else:
             raise socket.timeout("No server left in the pool")
 
+    @property
+    def connection(self):
+        return self._pool.reserve()
+
     def __call__(self, callback, *args, **kwargs):
         """Context-manager to obtain a Client object from the pool."""
-        retries = 0
-        while retries <= self.max_retries:
-            with self._pool.reserve() as connection:
-                try:
-                    return callback(connection)
-                except (IOError, RuntimeError, socket.error, ConnectionError):
-                    exc_info = sys.exc_info()
-                    retries += 1
-        raise exc_info[0], exc_info[1], exc_info[2]
+        with self.connection as connection:
+            return callback(connection)
 
     def call(self, name, *args, **kwargs):
         def callback(connection):
