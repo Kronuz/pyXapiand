@@ -69,7 +69,7 @@ class AliveCommand(object):
             AliveCommand.cmds_count = 0
 
     def cancelled(self):
-        self.executed(message="Command %d cancelled", logger=self.log.warning)
+        self.executed(None, message="Command %d cancelled", logger=self.log.warning)
 
     def error(self, e):
         self.executed(e, message="Command %d ERROR", logger=self.log.error)
