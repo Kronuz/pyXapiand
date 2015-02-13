@@ -37,7 +37,7 @@ class XapianResults(object):
             _first_result, self._first_result = self._first_result, None
             return self.get_data(_first_result)
         try:
-        return self.get_data(self.results.next())
+            return self.get_data(self.results.next())
         except StopIteration:
             self.connection.checkin()
             raise
