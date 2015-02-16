@@ -90,9 +90,8 @@ def command(threaded=False, **kwargs):
 
                 # Create a gevent socket for this thread from the other tread's socket
                 # (using the raw underlying socket, '_sock'):
-                client_socket = socket.socket(_sock=client_socket._sock)
+                self.client_socket = socket.socket(_sock=client_socket._sock)
 
-                self.client_socket = client_socket
                 try:
                     command.executed(func(self, *args, **kwargs))
                 except (IOError, RuntimeError, socket.error) as e:
