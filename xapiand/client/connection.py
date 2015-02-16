@@ -157,7 +157,7 @@ class Connection(object):
             pool, ts = self._checkout
             self._checkout = None
             self._client_responses_socket = None
-            # self.cmd_id += 1
+            self.cmd_id += 1
             pool._checkin_connection(ts, self)
 
     def _error_message(self, exception):
