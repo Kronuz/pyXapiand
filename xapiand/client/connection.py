@@ -245,7 +245,7 @@ class Connection(object):
             exc_info = sys.exc_info()
             e = exc_info[1]
             if len(e.args) == 1:
-                _errno, errmsg = 'UNKNOWN', e.args[0]
+                _errno, errmsg = "UNKNOWN", e.args[0]
             else:
                 _errno, errmsg = e.args
             raise ConnectionError("Error %s while writing to socket. %s." % (_errno, errmsg)), None, exc_info[2]

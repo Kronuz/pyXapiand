@@ -148,7 +148,7 @@ def format_time(timespan, precision=3):
                 break
         return " ".join(time)
 
-    units = ["s", "ms", '\xb5s', "ns"]  # the save value
+    units = ["s", "ms", "\xb5s", "ns"]  # the save value
     scaling = [1, 1e3, 1e6, 1e9]
 
     if timespan > 0.0:
