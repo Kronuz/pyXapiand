@@ -260,8 +260,8 @@ class Connection(object):
             if not response:
                 self.disconnect()
                 raise ConnectionError("No response!")
-            response = response[:-2]
             # print('--->>>>', id(self), '%s:%s' % (self.address[0], self.address[1]), repr(response), file=sys.stderr)
+            response = response[:-2]
             if response:
                 if response[0] in (b"#", b" "):
                     continue
