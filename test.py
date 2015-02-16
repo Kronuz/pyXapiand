@@ -11,7 +11,7 @@ import lorem_ipsum
 
 from xapiand import Xapian
 
-DATABASE = 'example'
+DATABASE = 'test'
 POOL_SIZE = 35
 THREADS = 10
 
@@ -59,10 +59,10 @@ class Search(threading.Thread):
                     # raise
                 print("%s - %d. %s" % (self.name, i, data))
                 i += 1
-            if i != expected:
-                print("%s - MISSING RESULTS! (received %d out of expected %d)" % (self.name, i, expected), file=sys.stderr)
             else:
                 done = True
+            if i != expected:
+                print("%s - MISSING RESULTS! (received %d out of expected %d)" % (self.name, i, expected), file=sys.stderr)
         except:
             raise
         else:
