@@ -28,7 +28,15 @@ logger.addHandler(handler)
 logger.setLevel(logging.DEBUG)
 
 
+class ConnectionClosed(Exception):
+    pass
+
+
 class InvalidCommand(Exception):
+    pass
+
+
+class KeepTrying(Exception):
     pass
 
 
@@ -237,6 +245,8 @@ class ClientReceiver(object):
         self.client_socket = client_socket
         self.address = address
         self.cmd_id = 0
+        self.activity = time.time()
+        self.buf = b''
 
         self.client_id = "Client-%s" % (hash((address[0], address[1])) & 0xffffff)
         current_thread = threading.current_thread()
@@ -258,29 +268,35 @@ class ClientReceiver(object):
     def connectionLost(self, client):
         logger.info("Lost connection (%d open connections)" % len(self.server.clients))
 
+    def get_message(self, required_type=None):
+        tmp = self.read(1024)
+        if not tmp:
+            ConnectionClosed
+        self.buf += tmp
+        try:
+            func = self.message_type[ord(self.buf[0])]
+        except (TypeError, IndexError):
+            raise InvalidCommand
+        try:
+            length, stride = decode_length(self.buf[1:])
+        except ValueError:
+            raise KeepTrying
+        message = self.buf[1 + stride:1 + stride + length]
+        if len(message) != length:
+            raise KeepTrying
+        self.buf = self.buf[1 + stride + length:]
+        self.activity = time.time()
+        return func, message
+
     def handle(self):
         try:
-            buf = b''
             while not self.closed:
-                tmp = self.read(1024)
-                if not tmp:
-                    break
-                buf += tmp
-                logger.debug("%r", buf)
-
                 try:
-                    func = self.message_type[ord(buf[0])]
-                except (TypeError, IndexError):
-                    raise InvalidCommand
-                try:
-                    length, stride = decode_length(buf[1:])
-                except ValueError:
-                    continue
-                message = buf[1 + stride:1 + stride + length]
-                if len(message) != length:
-                    continue
-                buf = buf[1 + stride + length:]
-                self.dispatch(func, message)
+                    func, message = self.get_message()
+                except KeepTrying:
+                    pass
+                else:
+                    self.dispatch(func, message)
         except InvalidCommand:
             logger.error("Invalid command received")
             self.client_socket._sock.close()
