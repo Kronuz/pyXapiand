@@ -219,6 +219,8 @@ def decode_length(encoded):
             size += 1
             if ch & 0x80:
                 break
+        else:
+            raise ValueError()
         decoded += 255
     else:
         decoded = 255
@@ -258,19 +260,34 @@ class ClientReceiver(object):
 
     def handle(self):
         try:
+            buf = b''
             while not self.closed:
+                tmp = self.read(1024)
+                if not tmp:
+                    break
+                buf += tmp
+                logger.debug("%r", buf)
+
                 try:
-                    func = self.message_type[ord(self.read(1))]
+                    func = self.message_type[ord(buf[0])]
                 except (TypeError, IndexError):
                     raise InvalidCommand
-                self.dispatch(func)
+                try:
+                    length, stride = decode_length(buf[1:])
+                except ValueError:
+                    continue
+                message = buf[1 + stride:1 + stride + length]
+                if len(message) != length:
+                    continue
+                buf = buf[1 + stride + length:]
+                self.dispatch(func, message)
         except InvalidCommand:
             logger.error("Invalid command received")
             self.client_socket._sock.close()
         except Exception:
             self.client_socket._sock.close()
 
-    def dispatch(self, func):
+    def dispatch(self, func, message):
         cmd = func.__name__.upper()
         command = AliveCommand(self, cmd=cmd, origin="%s:%d" % (self.address[0], self.address[1]))
 
@@ -278,7 +295,7 @@ class ClientReceiver(object):
             commands_pool = self.server.pool
             pool_size = self.server.pool_size
             pool_size_warning = self.server.pool_size_warning
-            commands_pool.spawn(func, command, self.client_socket, command)
+            commands_pool.spawn(func, command, self.client_socket, message, command)
             pool_used = len(commands_pool)
             if pool_used >= pool_size_warning:
                 logger.warning("Commands pool is close to be full (%s/%s)", pool_used, pool_size)
@@ -286,7 +303,7 @@ class ClientReceiver(object):
                 logger.error("Commands poll is full! (%s/%s)", pool_used, pool_size)
         else:
             try:
-                command.executed(func())
+                command.executed(func(message))
             except (IOError, RuntimeError, socket.error) as e:
                 command.error(e)
 
@@ -297,66 +314,66 @@ class ClientReceiver(object):
         self.closed = True
 
     def reply_update(self):
-        self.msg_update()
+        self.msg_update(None)
 
     @command
-    def msg_allterms(self):
+    def msg_allterms(self, message):
         pass
 
     @command
-    def msg_collfreq(self):
+    def msg_collfreq(self, message):
         pass
 
     @command
-    def msg_document(self):
+    def msg_document(self, message):
         pass
 
     @command
-    def msg_termexists(self):
+    def msg_termexists(self, message):
         pass
 
     @command
-    def msg_termfreq(self):
+    def msg_termfreq(self, message):
         pass
 
     @command
-    def msg_valuestats(self):
+    def msg_valuestats(self, message):
         pass
 
     @command
-    def msg_keepalive(self):
+    def msg_keepalive(self, message):
         pass
 
     @command
-    def msg_doclength(self):
+    def msg_doclength(self, message):
         pass
 
     @command
-    def msg_query(self):
+    def msg_query(self, message):
         pass
 
     @command
-    def msg_termlist(self):
+    def msg_termlist(self, message):
         pass
 
     @command
-    def msg_positionlist(self):
+    def msg_positionlist(self, message):
         pass
 
     @command
-    def msg_postlist(self):
+    def msg_postlist(self, message):
         pass
 
     @command
-    def msg_reopen(self):
+    def msg_reopen(self, message):
         pass
 
     @command
-    def msg_update(self):
+    def msg_update(self, message):
         """
         REPLY_UPDATE <protocol major version> <protocol minor version> I<db doc count> I(<last docid> - <db doc count>) I<doclen lower bound> I(<doclen upper bound> - <doclen lower bound>) B<has positions?> I<db total length> <UUID>
         """
-        XAPIAN_REMOTE_PROTOCOL_MAJOR_VERSION = 39
+        XAPIAN_REMOTE_PROTOCOL_MAJOR_VERSION = 38
         XAPIAN_REMOTE_PROTOCOL_MINOR_VERSION = 0
         message = b''
         message += chr(XAPIAN_REMOTE_PROTOCOL_MAJOR_VERSION)
@@ -380,71 +397,71 @@ class ClientReceiver(object):
         self.send_message(REPLY.REPLY_UPDATE, message)
 
     @command
-    def msg_adddocument(self):
+    def msg_adddocument(self, message):
         pass
 
     @command
-    def msg_cancel(self):
+    def msg_cancel(self, message):
         pass
 
     @command
-    def msg_deletedocumentterm(self):
+    def msg_deletedocumentterm(self, message):
         pass
 
     @command
-    def msg_commit(self):
+    def msg_commit(self, message):
         pass
 
     @command
-    def msg_replacedocument(self):
+    def msg_replacedocument(self, message):
         pass
 
     @command
-    def msg_replacedocumentterm(self):
+    def msg_replacedocumentterm(self, message):
         pass
 
     @command
-    def msg_deletedocument(self):
+    def msg_deletedocument(self, message):
         pass
 
     @command
-    def msg_writeaccess(self):
+    def msg_writeaccess(self, message):
         pass
 
     @command
-    def msg_getmetadata(self):
+    def msg_getmetadata(self, message):
         pass
 
     @command
-    def msg_setmetadata(self):
+    def msg_setmetadata(self, message):
         pass
 
     @command
-    def msg_addspelling(self):
+    def msg_addspelling(self, message):
         pass
 
     @command
-    def msg_removespelling(self):
+    def msg_removespelling(self, message):
         pass
 
     @command
-    def msg_getmset(self):
+    def msg_getmset(self, message):
         pass
 
     @command
-    def msg_shutdown(self):
+    def msg_shutdown(self, message):
         pass
 
     @command
-    def msg_metadatakeylist(self):
+    def msg_metadatakeylist(self, message):
         pass
 
     @command
-    def msg_freqs(self):
+    def msg_freqs(self, message):
         pass
 
     @command
-    def msg_uniqueterms(self):
+    def msg_uniqueterms(self, message):
         pass
 
 
