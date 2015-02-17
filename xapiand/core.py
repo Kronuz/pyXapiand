@@ -717,6 +717,71 @@ class Database(object):
             return self.get_doccount(_t=_t + 1)
         return doccount
 
+    def get_doclength_lower_bound(self, _t=0):
+        database = self.database
+        try:
+            doccount = database.get_doclength_lower_bound()
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            if _t > 3:
+                raise XapianError(exc)
+            elif _t > 1:
+                gevent.sleep(0.1)
+            self.reopen(_t > 1)
+            return self.get_doclength_lower_bound(_t=_t + 1)
+        return doccount
+
+    def get_doclength_upper_bound(self, _t=0):
+        database = self.database
+        try:
+            doccount = database.get_doclength_upper_bound()
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            if _t > 3:
+                raise XapianError(exc)
+            elif _t > 1:
+                gevent.sleep(0.1)
+            self.reopen(_t > 1)
+            return self.get_doclength_upper_bound(_t=_t + 1)
+        return doccount
+
+    def get_lastdocid(self, _t=0):
+        database = self.database
+        try:
+            doccount = database.get_lastdocid()
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            if _t > 3:
+                raise XapianError(exc)
+            elif _t > 1:
+                gevent.sleep(0.1)
+            self.reopen(_t > 1)
+            return self.get_lastdocid(_t=_t + 1)
+        return doccount
+
+    def has_positions(self, _t=0):
+        database = self.database
+        try:
+            doccount = database.has_positions()
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            if _t > 3:
+                raise XapianError(exc)
+            elif _t > 1:
+                gevent.sleep(0.1)
+            self.reopen(_t > 1)
+            return self.has_positions(_t=_t + 1)
+        return doccount
+
+    def get_avlength(self, _t=0):
+        database = self.database
+        try:
+            doccount = database.get_avlength()
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            if _t > 3:
+                raise XapianError(exc)
+            elif _t > 1:
+                gevent.sleep(0.1)
+            self.reopen(_t > 1)
+            return self.get_avlength(_t=_t + 1)
+        return doccount
+
     def get_document(self, docid, _t=0):
         database = self.database
         try:
