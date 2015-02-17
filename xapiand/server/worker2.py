@@ -223,7 +223,7 @@ def decode_length(encoded):
             raise ValueError()
         decoded += 255
     else:
-        decoded = 255
+        decoded = ord(decoded)
         size = 1
     return decoded, size
 
