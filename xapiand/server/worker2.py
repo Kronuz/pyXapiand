@@ -16,6 +16,7 @@ from gevent import socket
 from gevent.server import StreamServer
 from gevent.threadpool import ThreadPool
 
+import xapian
 from ..core import DatabasesPool
 from ..utils import format_time
 
@@ -395,7 +396,10 @@ class ClientReceiver(object):
 
     @command
     def msg_query(self, message):
-        pass
+        # Unserialise the Query.
+        length, stride = decode_length(message)
+        query = xapian.Query.unserialise(message[stride:stride + length])
+        message = message[stride + length:]
 
     @command
     def msg_termlist(self, message):
