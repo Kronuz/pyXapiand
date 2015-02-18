@@ -257,13 +257,16 @@ class ClientReceiver(object):
 
         self.message_type = MessageType(**dict((attr, getattr(self, attr.lower())) for attr in MESSAGE_TYPES))
 
-        self.endpoints = ['test']
+        self.endpoints = []
 
     def send(self, msg):
+        # logger.debug(">>> %s", repr(msg))
         return self.client_socket.sendall(msg)
 
     def read(self, size):
-        return self.client_socket.recv(size)
+        msg = self.client_socket.recv(size)
+        # logger.debug("<<< %s", repr(msg))
+        return msg
 
     def connectionMade(self, client):
         logger.info("New connection from %s: %s:%d (%d open connections)" % (client.client_id, self.address[0], self.address[1], len(self.server.clients)))
@@ -523,9 +526,8 @@ class ClientReceiver(object):
 
     @command
     def msg_select(self, message):
-        logger.debug(">>> MSG_SELECT: %s", message)
         self.endpoints = [message]
-        self.msg_update()
+        self.msg_update(None)
 
 
 class CommandServer(StreamServer):
