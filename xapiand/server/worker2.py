@@ -1,5 +1,6 @@
 from __future__ import unicode_literals, absolute_import, print_function
 
+import os
 import sys
 import time
 import signal
@@ -256,6 +257,8 @@ class ClientReceiver(object):
 
         self.message_type = MessageType(**dict((attr, getattr(self, attr.lower())) for attr in MESSAGE_TYPES))
 
+        self.endpoints = ['test']
+
     def send(self, msg):
         return self.client_socket.sendall(msg)
 
@@ -335,7 +338,20 @@ class ClientReceiver(object):
 
     @command
     def msg_allterms(self, message):
-        pass
+        prefix = message
+        prev = ''
+        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+            for t in db.allterms(prefix):
+                message = b''
+                message += encode_length(t.termfreq)
+                current = t.term
+                common = os.path.commonprefix([prev, current])
+                common_len = len(common)
+                message += chr(common_len)
+                message += current[common_len:]
+                prev = current[:255]
+                self.send_message(REPLY.REPLY_ALLTERMS, message)
+            self.send_message(REPLY.REPLY_DONE, b'')
 
     @command
     def msg_collfreq(self, message):
@@ -343,7 +359,16 @@ class ClientReceiver(object):
 
     @command
     def msg_document(self, message):
-        pass
+        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+            did = decode_length(message)[0]
+            document = db.get_document(did)
+            self.send_message(REPLY.REPLY_DOCDATA, document.get_data())
+            for i in document.values():
+                message = b''
+                message += encode_length(i.num)
+                message += i.value
+                self.send_message(REPLY.REPLY_VALUE, message)
+            self.send_message(REPLY.REPLY_DONE, b'')
 
     @command
     def msg_termexists(self, message):
@@ -371,7 +396,23 @@ class ClientReceiver(object):
 
     @command
     def msg_termlist(self, message):
-        pass
+        prev = ''
+        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+            did = decode_length(message)[0]
+            document = db.get_document(did)
+            self.send_message(REPLY.REPLY_DOCLENGTH, encode_length(db.get_doclength(did)))
+            for t in db.get_termlist(document):
+                message = b''
+                message += encode_length(t.wdf)
+                message += encode_length(t.termfreq)
+                current = t.term
+                common = os.path.commonprefix([prev, current])
+                common_len = len(common)
+                message += chr(common_len)
+                message += current[common_len:]
+                prev = current[:255]
+                self.send_message(REPLY.REPLY_TERMLIST, message)
+            self.send_message(REPLY.REPLY_DONE, b'')
 
     @command
     def msg_positionlist(self, message):
@@ -396,9 +437,8 @@ class ClientReceiver(object):
         message += chr(XAPIAN_REMOTE_PROTOCOL_MAJOR_VERSION)
         message += chr(XAPIAN_REMOTE_PROTOCOL_MINOR_VERSION)
 
-        endpoints = ['test']
-        if endpoints:
-            with self.server.databases_pool.database(endpoints, writable=False, create=True) as db:
+        if self.endpoints:
+            with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
                 num_docs = db.get_doccount()
                 doclen_lb = db.get_doclength_lower_bound()
                 message += encode_length(num_docs)
