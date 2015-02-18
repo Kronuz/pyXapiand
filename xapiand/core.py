@@ -43,9 +43,9 @@ else:
 
 
 def is_me(hostname, port):
+    return False
     if hostname == '127.0.0.1':
         return True
-    return False
 
 
 def find_terms(value, field=None):
