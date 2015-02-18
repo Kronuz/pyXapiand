@@ -4,13 +4,11 @@ import os
 import re
 import time
 import logging
-import subprocess
 from hashlib import md5
 from collections import deque
 from contextlib import contextmanager
 
 import gevent
-from gevent import pool, socket
 from gevent.lock import RLock
 
 import xapian
@@ -18,7 +16,7 @@ import xapian
 from .exceptions import XapianError, InvalidIndexError
 from .serialise import serialise_value, normalize
 from .utils import parse_url, build_url
-from .platforms import pid_exists
+
 
 DATABASE_MAX_LIFE = 900  # 900 = stop writer after 15 minutes of inactivity
 DATABASE_SHORT_LIFE = max(DATABASE_MAX_LIFE - 60, DATABASE_MAX_LIFE - DATABASE_MAX_LIFE / 3, 0)
@@ -34,7 +32,6 @@ PREFIX_RE = re.compile(r'(?:([_a-zA-Z][_a-zA-Z0-9]*):)?("[-\w.]+"|[-\w.]+)')
 TERM_SPLIT_RE = re.compile(r'[^-\w.]')
 
 XAPIAN_PREFER_GLASS = True
-XAPIAN_TCPSRV = '/usr/local/bin/xapian-tcpsrv-1.3'
 if XAPIAN_PREFER_GLASS:
     os.environ['XAPIAN_PREFER_GLASS'] = '1'
     os.environ['XAPIAN_PREFER_BRASS'] = '1'  # TODO: remove old BRASS here
@@ -43,6 +40,12 @@ else:
         del os.environ['XAPIAN_PREFER_GLASS']
     if 'XAPIAN_PREFER_BRASS' in os.environ:  # TODO: remove old BRASS here
         del os.environ['XAPIAN_PREFER_BRASS']
+
+
+def is_me(hostname, port):
+    if hostname == '127.0.0.1':
+        return True
+    return False
 
 
 def find_terms(value, field=None):
@@ -105,43 +108,6 @@ def prefixed(term, prefix=''):
         return prefix + ':' + term
 
 
-def _spawn_tcpservers(endpoints, data='.', log=logging):
-    from . import Xapian
-
-    max_pool_size = 10
-
-    all_servers = {}
-    p = pool.Pool(max_pool_size)
-
-    def spawner(db, parse, data, log):
-        scheme, hostname, port, username, password, path, query, query_dict = parse
-        servers = '%s:%s' % (hostname, port or 8890)
-        xapiand = all_servers.setdefault(servers, Xapian(
-            servers,
-            max_pool_size=max_pool_size,
-            max_retries=0,
-            max_connect_retries=1,
-            socket_timeout=1,
-            weak=True,
-            socket_class=socket.socket,
-            sleep=gevent.sleep,
-        ))
-        time_, address = xapiand.spawn(db)
-        server = TcpDatabase(db, None, address)
-        server.time = time_
-        return server
-
-    def _port(db):
-        if db.startswith('xapian://'):
-            try:
-                xapian_spawn(db, spawner)
-            except InvalidIndexError as exc:
-                log.error("%s", exc)
-
-    jobs = [p.spawn(_port, db) for db in endpoints]
-    gevent.joinall(jobs)
-
-
 def _xapian_subdatabase(subdatabases, db, writable, create, data='.', log=logging):
     parse = parse_url(db)
     scheme, hostname, port, username, password, path, query, query_dict = parse
@@ -156,16 +122,12 @@ def _xapian_subdatabase(subdatabases, db, writable, create, data='.', log=loggin
         if scheme == 'file':
             database = _xapian_database_open(path, writable, create, data, log)
         elif scheme == 'xapian':
-            if path:
-                try:
-                    server = tcpservers[db]
-                    if not server.active:
-                        raise KeyError
-                    hostname, port = server.address
-                except KeyError:
-                    raise InvalidIndexError("Cannot connect to TCP server")
-            timeout = int(query_dict.get('timeout', 0))
-            database = _xapian_database_connect(hostname, port or 8891, timeout, writable, data, log)
+            port = port or 8890
+            if is_me(hostname, port):
+                database = _xapian_database_open(path, writable, create, data, log)
+            else:
+                timeout = int(query_dict.get('timeout', 0))
+                database = _xapian_database_connect(hostname, port, timeout, path, writable, data, log)
         else:
             raise InvalidIndexError("Invalid database scheme")
         database._db = db
@@ -203,7 +165,7 @@ def _xapian_database_open(path, writable, create, data='.', log=logging):
     return database
 
 
-def _xapian_database_connect(host, port, timeout, writable, data='.', log=logging):
+def _xapian_database_connect(host, port, timeout, path, writable, data='.', log=logging):
     try:
         if writable:
             database = xapian.remote_open_writable(host, port, timeout)
@@ -222,19 +184,6 @@ def _xapian_database_connect(host, port, timeout, writable, data='.', log=loggin
 
 
 def _xapian_database(endpoints, writable, create, data='.', log=logging):
-    missing = []
-    with tcpservers.lock:
-        now = time.time()
-        for db in endpoints:
-            try:
-                server = tcpservers[db]
-                if not server.process:
-                    raise KeyError
-                server.time = now
-            except KeyError:
-                missing.append(db)
-    _spawn_tcpservers(missing, data=data, log=log)
-
     if writable:
         database = xapian.WritableDatabase()
     else:
@@ -263,83 +212,6 @@ def _xapian_database(endpoints, writable, create, data='.', log=logging):
     num = len(database._all_databases)
     log.debug("%s %s with %d endpoint%s", "Writable database" if writable else "Database", "used" if create else "opened", num, '' if num == 1 else 's')
     return database
-
-
-def _xapian_spawn(address, path, writable=True, data='.', log=logging):
-    if path[0] not in ('/', '.'):
-        path = os.path.join(data, path)
-    if not os.path.isdir(path):
-        if writable:
-            os.makedirs(path)
-        else:
-            raise IOError("Cannot create directory '%s' (No such file or directory)" % path)
-    args = [XAPIAN_TCPSRV, '--interface=%s' % address[0], '--port=%s' % address[1], '--timeout=0', '--writable', '--quiet', path]
-    FNULL = open(os.devnull, 'w')
-    try:
-        process = subprocess.Popen(args, stdout=FNULL, stderr=subprocess.STDOUT)
-        log.info("Spawned xapian TCP server for \"%s\": %s:%s (pid:%s)", path, address[0], address[1], process.pid)
-        # Try conncting...
-        retries = 0
-        max_retries = 4
-        address = ('127.0.0.1' if address[0] == '0.0.0.0' else address[0], address[1])
-        while retries <= max_retries:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(0.1)
-            try:
-                sock.connect(address)
-                break
-            except socket.error as exc:
-                if exc.errno == socket.EISCONN:
-                    break   # we're good
-                if exc.errno == socket.EINVAL:
-                    # we're doomed, recreate socket
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.settimeout(0.1)
-            except Exception:
-                pass
-            gevent.sleep(0.3)
-            retries += 1
-        if retries <= max_retries:
-            sock.close()
-        else:
-            log.error("Could not connect to spawned server!")
-        return process
-    except Exception as exc:
-        log.error("Can't exec %r: %s", ' '.join(args), exc)
-        raise IOError("Cannot spawn xapian TCP server process")
-
-
-def _xapian_spawner(db, parse, data='.', log=logging):
-    scheme, hostname, port, username, password, path, query, query_dict = parse
-    port = tcpservers.acquire()
-    process = _xapian_spawn(('0.0.0.0', port), path, data=data, log=log)
-    # if port == 8900: port = 8990  # port forwarder enabled
-    return TcpDatabase(db, process, (hostname, port))
-
-
-def xapian_spawn(db, spawner=_xapian_spawner, data='.', log=logging):
-    parse = parse_url(db)
-    db = build_url(*parse)
-    scheme, hostname, port, username, password, path, query, query_dict = parse
-    try:
-        with tcpservers.lock:
-            server = tcpservers[db]
-            if not server.active:
-                raise KeyError
-    except KeyError:
-        try:
-            server = spawner(db, parse, data=data, log=log)
-            tcpservers.setdefault(db, server)
-        except Exception as exc:
-            try:
-                server = tcpservers[db]
-                if not server.active:
-                    raise KeyError
-            except KeyError:
-                raise InvalidIndexError("Cannot spawn TCP server: %s" % exc)
-    if server.process:
-        server.time = time.time()
-    return server.time, server.address
 
 
 class CleanableObject(object):
@@ -382,30 +254,6 @@ class CleanablePool(dict):
 
         for obj in cleanups:
             obj.cleanup()
-
-
-class TcpDatabase(CleanableObject):
-    def __init__(self, database, process, address):
-        super(TcpDatabase, self).__init__()
-        self.database = database
-        self.process = process
-        self.address = address
-
-    @property
-    def active(self):
-        if self.process and not pid_exists(self.process.pid):
-            return False
-        if time.time() - self.time > DATABASE_SHORT_LIFE:
-            return False
-        return True
-
-    def cleanup(self, data='.', log=logging):
-        if not self.cleaned:
-            if self.process:
-                self.process.kill()
-                tcpservers.release(self.address[1])
-                log.info("Stopped xapian TCP server: %s:%s (pid:%s).", self.address[0], self.address[1], self.process.pid)
-            self.cleaned = True
 
 
 class DatabasesPoolQueue(CleanableObject):
@@ -466,32 +314,6 @@ class DatabasesPool(CleanablePool):
                     else:
                         database.close()
                 pool_queue.time = time.time()
-
-
-class TcpPool(CleanablePool):
-    def __init__(self, *args, **kwargs):
-        super(TcpPool, self).__init__(*args, **kwargs)
-        self.unused = deque()
-        self.used = set()
-        self.port = 8900
-
-    def acquire(self):
-        with self.lock:
-            try:
-                if len(self.used) < MIN_TCP_SERVER_PORTS:
-                    raise IndexError
-                port = self.unused.pop()
-            except IndexError:
-                port = self.port
-                self.port += 1
-            self.used.add(port)
-        return port
-
-    def release(self, port):
-        with self.lock:
-            self.used.discard(port)
-            self.unused.append(port)
-tcpservers = TcpPool()
 
 
 class Database(object):
@@ -841,5 +663,4 @@ class Database(object):
 
 
 def xapian_cleanup(databases_pool, timeout, data='.', log=logging):
-    tcpservers.cleanup(timeout, data=data, log=log)
     databases_pool.cleanup(timeout, data=data, log=log)
