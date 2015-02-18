@@ -163,6 +163,7 @@ MESSAGE_TYPES = [
     'MSG_METADATAKEYLIST',      # Iterator for metadata keys
     'MSG_FREQS',                # Get termfreq and collfreq
     'MSG_UNIQUETERMS',          # Get number of unique terms in doc
+    'MSG_SELECT',               # Select current database
 ]
 MessageType = collections.namedtuple('MessageType', MESSAGE_TYPES)
 MESSAGE = MessageType(**dict((attr, i) for i, attr in enumerate(MESSAGE_TYPES)))
@@ -479,6 +480,12 @@ class ClientReceiver(object):
     @command
     def msg_uniqueterms(self, message):
         pass
+
+    @command
+    def msg_select(self, message):
+        logger.debug(">>> MSG_SELECT: %s", message)
+        self.endpoints = [message]
+        self.msg_update()
 
 
 class CommandServer(StreamServer):
