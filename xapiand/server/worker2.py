@@ -388,7 +388,7 @@ class ClientReceiver(object):
 
     @command
     def msg_keepalive(self, message):
-        pass
+        self.send_message(REPLY.REPLY_DONE, b'')
 
     @command
     def msg_doclength(self, message):
