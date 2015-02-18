@@ -170,7 +170,7 @@ def _xapian_database_connect(host, port, timeout, path, writable, data='.', log=
         if writable:
             database = xapian.remote_open_writable(host, port, timeout, 10000, path)
         else:
-            database = xapian.remote_open(host, port, 0, timeout, 10000, path)
+            database = xapian.remote_open(host, port, timeout, 10000, path)
         database.keep_alive()
     except xapian.NetworkError as exc:
         raise InvalidIndexError("Unable to connect to index at %s:%s: %s" % (host, port, exc))
