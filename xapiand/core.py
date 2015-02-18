@@ -1,5 +1,6 @@
 from __future__ import absolute_import, unicode_literals, print_function
 
+import sys
 import os
 import re
 import time
@@ -769,6 +770,19 @@ class Database(object):
             return self.has_positions(_t=_t + 1)
         return doccount
 
+    def allterms(self, prefix, _t=0):
+        database = self.database
+        try:
+            doccount = database.allterms(prefix)
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            if _t > 3:
+                raise XapianError(exc)
+            elif _t > 1:
+                gevent.sleep(0.1)
+            self.reopen(_t > 1)
+            return self.allterms(prefix, _t=_t + 1)
+        return doccount
+
     def get_avlength(self, _t=0):
         database = self.database
         try:
@@ -823,6 +837,19 @@ class Database(object):
             if self.reopen(_t > 1) != database:
                 document = self.get_document(document.get_docid())
             return self.get_data(document, _t=_t + 1)
+        return _data
+
+    def get_doclength(self, docid, _t=0):
+        database = self.database
+        try:
+            _data = database.get_doclength(docid)
+        except (xapian.NetworkError, xapian.DatabaseError) as exc:
+            if _t > 3:
+                raise XapianError(exc)
+            elif _t > 1:
+                gevent.sleep(0.1)
+            self.reopen(_t > 1)
+            return self.get_doclength(docid, _t=_t + 1)
         return _data
 
     def get_termlist(self, document, _t=0):
