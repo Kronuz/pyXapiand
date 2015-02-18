@@ -38,10 +38,6 @@ class InvalidCommand(Exception):
     pass
 
 
-class KeepTrying(Exception):
-    pass
-
-
 class DeadException(Exception):
     def __init__(self, command):
         self.command = command
@@ -277,34 +273,31 @@ class ClientReceiver(object):
         logger.info("Lost connection (%d open connections)" % len(self.server.clients))
 
     def get_message(self, required_type=None):
-        tmp = self.read(1024)
-        if not tmp:
-            ConnectionClosed
-        self.buf += tmp
-        try:
-            func = self.message_type[ord(self.buf[0])]
-        except (TypeError, IndexError):
-            raise InvalidCommand
-        try:
-            length, stride = decode_length(self.buf[1:])
-        except ValueError:
-            raise KeepTrying
-        message = self.buf[1 + stride:1 + stride + length]
-        if len(message) != length:
-            raise KeepTrying
-        self.buf = self.buf[1 + stride + length:]
-        self.activity = time.time()
-        return func, message
+        while True:
+            tmp = self.read(1024)
+            if not tmp:
+                ConnectionClosed
+            self.buf += tmp
+            try:
+                func = self.message_type[ord(self.buf[0])]
+            except (TypeError, IndexError):
+                raise InvalidCommand
+            try:
+                length, stride = decode_length(self.buf[1:])
+            except ValueError:
+                continue
+            message = self.buf[1 + stride:1 + stride + length]
+            if len(message) != length:
+                continue
+            self.buf = self.buf[1 + stride + length:]
+            self.activity = time.time()
+            return func, message
 
     def handle(self):
         try:
             while not self.closed:
-                try:
-                    func, message = self.get_message()
-                except KeepTrying:
-                    pass
-                else:
-                    self.dispatch(func, message)
+                func, message = self.get_message()
+                self.dispatch(func, message)
         except InvalidCommand:
             logger.error("Invalid command received")
             self.client_socket._sock.close()
