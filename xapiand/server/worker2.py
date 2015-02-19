@@ -445,9 +445,9 @@ class ClientReceiver(object):
 
     @command
     def msg_allterms(self, message):
-        prefix = message
-        prev = ''
         with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+            prefix = message
+            prev = b''
             for t in db.allterms(prefix):
                 message = b''
                 message += encode_length(t.termfreq)
@@ -526,11 +526,11 @@ class ClientReceiver(object):
 
     @command
     def msg_termlist(self, message):
-        prev = ''
         with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
             did = decode_length(message)[0]
             document = db.get_document(did)
             self.send_message(REPLY.REPLY_DOCLENGTH, encode_length(db.get_doclength(did)))
+            prev = b''
             for t in db.get_termlist(document):
                 message = b''
                 message += encode_length(t.wdf)
