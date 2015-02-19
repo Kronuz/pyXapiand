@@ -384,7 +384,7 @@ class ClientReceiver(object):
         while True:
             tmp = self.read(1024)
             if not tmp:
-                ConnectionClosed
+                raise ConnectionClosed
             self.buf += tmp
             try:
                 func = self.message_type[ord(self.buf[0])]
@@ -408,6 +408,8 @@ class ClientReceiver(object):
                 self.dispatch(func, message)
         except InvalidCommand:
             logger.error("Invalid command received")
+            self.client_socket._sock.close()
+        except ConnectionClosed:
             self.client_socket._sock.close()
         except Exception:
             self.client_socket._sock.close()
@@ -635,7 +637,7 @@ class ClientReceiver(object):
 
     @command
     def msg_shutdown(self, message):
-        pass
+        raise ConnectionClosed
 
     @command
     def msg_metadatakeylist(self, message):
