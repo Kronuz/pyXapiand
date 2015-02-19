@@ -20,6 +20,7 @@ from gevent.threadpool import ThreadPool
 import xapian
 from ..core import DatabasesPool
 from ..utils import format_time
+from .exceptions import XapianError
 
 LOG_FORMAT = "[%(asctime)s: %(levelname)s/%(processName)s:%(threadName)s] %(message)s"
 
@@ -503,8 +504,28 @@ class ClientReceiver(object):
     def msg_query(self, message):
         # Unserialise the Query.
         length, message = decode_length(message)
+
         query = xapian.Query.unserialise(message[:length])
         message = message[length:]
+
+        qlen, message = decode_length(message)
+
+        collapse_max, message = decode_length(message)
+
+        collapse_key = xapian.BAD_VALUENO
+        if collapse_max:
+            collapse_key, message = decode_length(message)
+
+        if len(message) < 4 or message[0] not in b'012':
+            raise XapianError(xapian.NetworkError)
+
+        order = ord(message[1]) - ord('0')
+        sort_key, message = decode_length(message[1:])
+
+        if message[0] not in b'0123':
+            raise XapianError(xapian.NetworkError)
+
+        sort_value_forward = (ord(message[1]) != ord('0'))
 
     @command
     def msg_termlist(self, message):
