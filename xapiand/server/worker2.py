@@ -461,8 +461,9 @@ class ClientReceiver(object):
             self.send_message(REPLY.REPLY_DONE, b'')
 
     @command
-    def msg_collfreq(self, message):
-        pass
+    def msg_collfreq(self, term):
+        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+            self.send_message(REPLY.REPLY_COLLFREQ, encode_length(db.get_collection_freq(term)))
 
     @command
     def msg_document(self, message):
@@ -478,8 +479,9 @@ class ClientReceiver(object):
             self.send_message(REPLY.REPLY_DONE, b'')
 
     @command
-    def msg_termexists(self, message):
-        pass
+    def msg_termexists(self, term):
+        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+            self.send_message((REPLY.REPLY_TERMEXISTS if db.term_exists(term) else REPLY.REPLY_TERMDOESNTEXIST), b'')
 
     @command
     def msg_termfreq(self, term):
@@ -488,7 +490,18 @@ class ClientReceiver(object):
 
     @command
     def msg_valuestats(self, message):
-        pass
+        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+            while message:
+                slot, message = decode_length(message)
+                reply = b''
+                reply += encode_length(db.get_value_freq(slot))
+                bound = db.get_value_lower_bound(slot)
+                reply += encode_length(len(bound))
+                reply += bound
+                bound = db.get_value_upper_bound(slot)
+                reply += encode_length(len(bound))
+                reply += bound
+                self.send_message(REPLY.REPLY_VALUESTATS, reply)
 
     @command
     def msg_keepalive(self, message):
@@ -496,7 +509,9 @@ class ClientReceiver(object):
 
     @command
     def msg_doclength(self, message):
-        pass
+        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+            did, message = decode_length(message)
+            self.send_message(REPLY.REPLY_DOCLENGTH, encode_length(db.get_doclength(did)))
 
     @command
     def msg_query(self, message):
@@ -547,7 +562,15 @@ class ClientReceiver(object):
 
     @command
     def msg_positionlist(self, message):
-        pass
+        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+            did, term = decode_length(message)
+
+            lastpos = -1
+            for pos in db.positionlist(did, term):
+                self.send_message(REPLY.REPLY_POSITIONLIST, encode_length(pos - lastpos - 1))
+                lastpos = pos
+
+            self.send_message(REPLY.REPLY_DONE, b'')
 
     @command
     def msg_postlist(self, term):
