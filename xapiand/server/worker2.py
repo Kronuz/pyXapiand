@@ -2,6 +2,7 @@ from __future__ import unicode_literals, absolute_import, print_function
 
 import os
 import sys
+import math
 import time
 import signal
 import logging
@@ -193,6 +194,116 @@ REPLY_TYPES = [
 ]
 ReplyType = collections.namedtuple('ReplyType', REPLY_TYPES)
 REPLY = ReplyType(**dict((attr, i) for i, attr in enumerate(REPLY_TYPES)))
+
+
+def base256ify_double(v):
+    v, exp = math.frexp(v)
+    # v is now in the range [0.5, 1.0)
+    exp -= 1
+    v = math.ldexp(v, (exp & 7) + 1)
+    # v is now in the range [1.0, 256.0)
+    exp >>= 3
+    return v, exp
+
+
+def serialise_double(v):
+    # First byte:
+    #   bit 7 Negative flag
+    #   bit 4..6 Mantissa length - 1
+    #   bit 0..3 --- 0-13 -> Exponent + 7
+    #             \- 14 -> Exponent given by next byte
+    #              - 15 -> Exponent given by next 2 bytes
+    #
+    #  Then optional medium (1 byte) or large exponent (2 bytes, lsb first)
+    #
+    #  Then mantissa (0 iff value is 0)
+    v = float(v)
+
+    negative = 0x80 if v < 0.0 else 0x00
+    if negative:
+        v = -v
+
+    v, exp = base256ify_double(v)
+
+    result = []
+    if exp >= -7 and exp <= 6:
+        result.append(chr((exp + 7) | negative))
+    elif exp >= -128 and exp < 127:
+        result.append(b'\x8e' if negative else b'\x0e')
+        result.append(chr(exp + 128))
+    elif exp < -32768 or exp > 32767:
+        raise ValueError("Insane exponent in floating point number")
+    else:
+        result.append(b'\x8f' if negative else b'\x0f')
+        result.append(chr((exp + 32768) & 0xff))
+        result.append(chr((exp + 32768) >> 8))
+
+    n = len(result)
+
+    for b in range(8):
+        byte = int(v) & 0xff
+        result.append(chr(byte))
+        v -= float(byte)
+        v *= 256.0
+        if not v:
+            break
+
+    n = len(result) - n
+
+    if n:
+        result[0] = chr(ord(result[0]) | ((n - 1) << 4))
+
+    return ''.join(result)
+
+
+DBL_MAX = sys.float_info.max
+DBL_MAX_MANTISSA, DBL_MAX_EXP = base256ify_double(DBL_MAX)
+
+
+def unserialise_double(d):
+    if len(d) < 2:
+        raise ValueError("Bad encoded double: insufficient data")
+
+    first = ord(d[0])
+    if first == 0 and d[1] == '\x00':
+        return 0.0
+    d = d[1:]
+
+    negative = first & 0x80
+    mantissa_len = ((first >> 4) & 0x07) + 1
+
+    exp = first & 0x0f
+    if exp >= 14:
+        bigexp = ord(d[0])
+        if exp == 15:
+            exp = bigexp | (ord(d[1]) << 8)
+            exp -= 32768
+            d = d[2:]
+        else:
+            exp = bigexp - 128
+            d = d[1:]
+    else:
+        exp -= 7
+
+    if len(d) < mantissa_len:
+        raise ValueError("Bad encoded double: short mantissa")
+
+    v = 0.0
+
+    mantissa = d[:mantissa_len]
+    for c in reversed(mantissa):
+        v /= 256.0
+        v += float(ord(c))
+
+    if exp > DBL_MAX_EXP or exp == DBL_MAX_EXP and v > DBL_MAX_MANTISSA:
+        v = float('inf')
+    elif exp:
+        v = math.ldexp(v, exp * 8)
+
+    if negative:
+        v = -v
+
+    return v
 
 
 def encode_length(decoded):
