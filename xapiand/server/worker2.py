@@ -289,18 +289,21 @@ def unserialise_double(buf):
     if len(buf) < mantissa_len:
         raise ValueError("Bad encoded double: short mantissa")
 
-    double = 0.0
-
-    mantissa = buf[:mantissa_len]
-    buf = buf[mantissa_len:]
-    for c in reversed(mantissa):
-        double /= 256.0
-        double += float(ord(c))
-
-    if exp > DBL_MAX_EXP or exp == DBL_MAX_EXP and double > DBL_MAX_MANTISSA:
+    if exp > DBL_MAX_EXP:
         double = float('inf')
-    elif exp:
-        double = math.ldexp(double, exp * 8)
+    else:
+        double = 0.0
+        mantissa = buf[:mantissa_len]
+        buf = buf[mantissa_len:]
+        for c in reversed(mantissa):
+            double *= 0.00390625  # 1 / 256
+            double += float(ord(c))
+            if exp == DBL_MAX_EXP and double > DBL_MAX_MANTISSA:
+                double = float('inf')
+                break
+        else:
+            if exp:
+                double = math.ldexp(double, exp * 8)
 
     if negative:
         double = -double
