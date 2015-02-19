@@ -196,17 +196,21 @@ ReplyType = collections.namedtuple('ReplyType', REPLY_TYPES)
 REPLY = ReplyType(**dict((attr, i) for i, attr in enumerate(REPLY_TYPES)))
 
 
-def base256ify_double(v):
-    v, exp = math.frexp(v)
-    # v is now in the range [0.5, 1.0)
+def base256ify_double(double):
+    mantissa, exp = math.frexp(double)
+    # mantissa is now in the range [0.5, 1.0)
     exp -= 1
-    v = math.ldexp(v, (exp & 7) + 1)
-    # v is now in the range [1.0, 256.0)
+    mantissa = math.ldexp(mantissa, (exp & 7) + 1)
+    # mantissa is now in the range [1.0, 256.0)
     exp >>= 3
-    return v, exp
+    return mantissa, exp
 
 
-def serialise_double(v):
+DBL_MAX = sys.float_info.max
+DBL_MAX_MANTISSA, DBL_MAX_EXP = base256ify_double(DBL_MAX)
+
+
+def serialise_double(double):
     # First byte:
     #   bit 7 Negative flag
     #   bit 4..6 Mantissa length - 1
@@ -217,13 +221,13 @@ def serialise_double(v):
     #  Then optional medium (1 byte) or large exponent (2 bytes, lsb first)
     #
     #  Then mantissa (0 iff value is 0)
-    v = float(v)
+    double = float(double)
 
-    negative = 0x80 if v < 0.0 else 0x00
+    negative = 0x80 if double < 0.0 else 0x00
     if negative:
-        v = -v
+        double = -double
 
-    v, exp = base256ify_double(v)
+    double, exp = base256ify_double(double)
 
     result = []
     if exp >= -7 and exp <= 6:
@@ -241,11 +245,11 @@ def serialise_double(v):
     n = len(result)
 
     for b in range(8):
-        byte = int(v) & 0xff
+        byte = int(double) & 0xff
         result.append(chr(byte))
-        v -= float(byte)
-        v *= 256.0
-        if not v:
+        double -= float(byte)
+        double *= 256.0
+        if not double:
             break
 
     n = len(result) - n
@@ -256,66 +260,63 @@ def serialise_double(v):
     return ''.join(result)
 
 
-DBL_MAX = sys.float_info.max
-DBL_MAX_MANTISSA, DBL_MAX_EXP = base256ify_double(DBL_MAX)
-
-
-def unserialise_double(d):
-    if len(d) < 2:
+def unserialise_double(buf):
+    if len(buf) < 2:
         raise ValueError("Bad encoded double: insufficient data")
 
-    first = ord(d[0])
-    if first == 0 and d[1] == '\x00':
-        return 0.0
-    d = d[1:]
+    first = ord(buf[0])
+    if first == 0 and buf[1] == '\x00':
+        return 0.0, buf[2:]
+    buf = buf[1:]
 
     negative = first & 0x80
     mantissa_len = ((first >> 4) & 0x07) + 1
 
     exp = first & 0x0f
     if exp >= 14:
-        bigexp = ord(d[0])
+        bigexp = ord(buf[0])
         if exp == 15:
-            exp = bigexp | (ord(d[1]) << 8)
+            exp = bigexp | (ord(buf[1]) << 8)
             exp -= 32768
-            d = d[2:]
+            buf = buf[2:]
         else:
             exp = bigexp - 128
-            d = d[1:]
+            buf = buf[1:]
     else:
         exp -= 7
 
-    if len(d) < mantissa_len:
+    if len(buf) < mantissa_len:
         raise ValueError("Bad encoded double: short mantissa")
 
-    v = 0.0
+    double = 0.0
 
-    mantissa = d[:mantissa_len]
+    mantissa = buf[:mantissa_len]
+    buf = buf[mantissa_len:]
     for c in reversed(mantissa):
-        v /= 256.0
-        v += float(ord(c))
+        double /= 256.0
+        double += float(ord(c))
 
-    if exp > DBL_MAX_EXP or exp == DBL_MAX_EXP and v > DBL_MAX_MANTISSA:
-        v = float('inf')
+    if exp > DBL_MAX_EXP or exp == DBL_MAX_EXP and double > DBL_MAX_MANTISSA:
+        double = float('inf')
     elif exp:
-        v = math.ldexp(v, exp * 8)
+        double = math.ldexp(double, exp * 8)
 
     if negative:
-        v = -v
+        double = -double
 
-    return v
+    return double, buf
 
 
-def encode_length(decoded):
-    if decoded < 255:
-        encoded = chr(decoded)
+def encode_length(length):
+    if length < 255:
+        encoded = chr(length)
     else:
         encoded = b'\xff'
-        decoded -= 255
+        length -= 255
         while True:
-            b = decoded & 0x7f
-            decoded >>= 7
-            if decoded:
+            b = length & 0x7f
+            length >>= 7
+            if length:
                 encoded += chr(b)
             else:
                 encoded += chr(b | 0x80)
@@ -323,27 +324,27 @@ def encode_length(decoded):
     return encoded
 
 
-def decode_length(encoded):
-    decoded = encoded[0]
-    if decoded == b'\xff':
-        encoded = encoded[1:]
-        decoded = 0
+def decode_length(buf):
+    length = buf[0]
+    buf = buf[1:]
+    if length == b'\xff':
+        length = 0
         shift = 0
-        size = 1
-        for ch in encoded:
+        size = 0
+        for ch in buf:
             ch = ord(ch)
-            decoded |= (ch & 0x7f) << shift
+            length |= (ch & 0x7f) << shift
             shift += 7
             size += 1
             if ch & 0x80:
                 break
         else:
             raise ValueError("Bad encoded length: insufficient data")
-        decoded += 255
+        length += 255
+        buf = buf[size:]
     else:
-        decoded = ord(decoded)
-        size = 1
-    return decoded, size
+        length = ord(length)
+    return length, buf
 
 
 class ClientReceiver(object):
@@ -394,13 +395,13 @@ class ClientReceiver(object):
             except (TypeError, IndexError):
                 raise InvalidCommand
             try:
-                length, stride = decode_length(self.buf[1:])
+                length, self.buf = decode_length(self.buf[1:])
             except ValueError:
                 continue
-            message = self.buf[1 + stride:1 + stride + length]
+            message = self.buf[:length]
             if len(message) != length:
                 continue
-            self.buf = self.buf[1 + stride + length:]
+            self.buf = self.buf[length:]
             self.activity = time.time()
             return func, message
 
@@ -501,9 +502,9 @@ class ClientReceiver(object):
     @command
     def msg_query(self, message):
         # Unserialise the Query.
-        length, stride = decode_length(message)
-        query = xapian.Query.unserialise(message[stride:stride + length])
-        message = message[stride + length:]
+        length, message = decode_length(message)
+        query = xapian.Query.unserialise(message[:length])
+        message = message[length:]
 
     @command
     def msg_termlist(self, message):
