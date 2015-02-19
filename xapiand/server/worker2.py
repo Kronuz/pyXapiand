@@ -338,7 +338,7 @@ def decode_length(encoded):
             if ch & 0x80:
                 break
         else:
-            raise ValueError()
+            raise ValueError("Bad encoded length: insufficient data")
         decoded += 255
     else:
         decoded = ord(decoded)
