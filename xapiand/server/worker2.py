@@ -597,7 +597,7 @@ class ClientReceiver(object):
         self.send_message(REPLY.REPLY_DONE, b'')
 
     @command
-    def msg_update(self, message):
+    def msg_update(self, message, db=None):
         """
         REPLY_UPDATE <protocol major version> <protocol minor version> I<db doc count> I(<last docid> - <db doc count>) I<doclen lower bound> I(<doclen upper bound> - <doclen lower bound>) B<has positions?> I<db total length> <UUID>
         """
@@ -608,18 +608,26 @@ class ClientReceiver(object):
         reply += chr(XAPIAN_REMOTE_PROTOCOL_MINOR_VERSION)
 
         if self.endpoints:
-            with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+            def get_stats(db):
                 num_docs = db.get_doccount()
                 doclen_lb = db.get_doclength_lower_bound()
-                reply += encode_length(num_docs)
-                reply += encode_length(db.get_lastdocid() - num_docs)
-                reply += encode_length(doclen_lb)
-                reply += encode_length(db.get_doclength_upper_bound() - doclen_lb)
-                reply += (b'1' if db.has_positions() else b'0')
+                stats = b''
+                stats += encode_length(num_docs)
+                stats += encode_length(db.get_lastdocid() - num_docs)
+                stats += encode_length(doclen_lb)
+                stats += encode_length(db.get_doclength_upper_bound() - doclen_lb)
+                stats += (b'1' if db.has_positions() else b'0')
                 total_len = int(db.get_avlength() * num_docs + 0.5)
-                reply += encode_length(total_len)
+                stats += encode_length(total_len)
                 uuid = db.get_uuid()
-                reply += uuid
+                stats += uuid
+                return stats
+
+            if db:
+                reply += get_stats(db)
+            else:
+                with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+                    reply += get_stats(db)
 
         self.send_message(REPLY.REPLY_UPDATE, reply)
 
