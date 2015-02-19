@@ -9,7 +9,7 @@ from collections import deque
 from contextlib import contextmanager
 
 import gevent
-from gevent.lock import RLock
+from gevent.lock import RLock, Semaphore
 
 import xapian
 
@@ -218,11 +218,13 @@ class CleanableObject(object):
     def __init__(self):
         self.lock = RLock()
         self.time = time.time()
-        self.used = False
         self.cleaned = False
 
     def __del__(self):
         self.cleanup()
+
+    def is_used(self):
+        return False
 
     def cleanup(self, data='.', log=logging):
         # self.cleaned = True
@@ -247,7 +249,7 @@ class CleanablePool(dict):
         with self.lock:
             cleanups = []
             for key, obj in list(self.items()):
-                if not obj.used and now - obj.time > timeout:
+                if not obj.is_used() and now - obj.time > timeout:
                     cleanups.append(obj)
                     del self[key]
             self.time = now
@@ -257,19 +259,33 @@ class CleanablePool(dict):
 
 
 class DatabasesPoolQueue(CleanableObject):
-    def __init__(self):
+    def __init__(self, pool_limit=None):
+        if pool_limit is None:
+            pool_limit = 1000
         super(DatabasesPoolQueue, self).__init__()
         self.unused = deque()
         self.used = set()
+        self.semaphore = Semaphore(pool_limit)
+
+    def is_used(self):
+        return self.used or self.semaphore.locked()
 
     def cleanup(self, data='.', log=logging):
+        """
+        Method called by CleanablePool, when the time has come for the
+        cleanable object to die (obj must have returned False to is_used).
+
+        """
         if not self.cleaned:
             for database in self.unused:
                 database.close()
+                self.semaphore.release()
             self.cleaned = True
 
 
 class DatabasesPool(CleanablePool):
+    pool_size = 100
+
     def __init__(self, *args, **kwargs):
         self.data = kwargs.pop('data', '.')
         self.log = kwargs.pop('log', logging)
@@ -286,7 +302,7 @@ class DatabasesPool(CleanablePool):
         endpoints = tuple(build_url(*parse_url(db.strip())) for db in endpoints)
 
         with self.lock:
-            pool_queue = self.setdefault((writable, endpoints), DatabasesPoolQueue())
+            pool_queue = self.setdefault((writable, endpoints), DatabasesPoolQueue(pool_limit=1 if writable else None))
             with pool_queue.lock:
                 try:
                     database = pool_queue.unused.pop()
@@ -297,8 +313,10 @@ class DatabasesPool(CleanablePool):
 
         try:
             if new:
+                pool_queue.semaphore.acquire()
                 database = Database(endpoints, writable, create, data=self.data, log=self.log)
                 pool_queue.used.add(database)
+                pool_queue.time = time.time()
             if reopen:
                 database.reopen()
 
@@ -308,11 +326,14 @@ class DatabasesPool(CleanablePool):
             with pool_queue.lock:
                 if database:
                     pool_queue.used.discard(database)
-                    if len(pool_queue.unused) < 10:
-                        if not database.database._closed:
+                    if len(pool_queue.unused) < self.pool_size:
+                        if database.database._closed:
+                            pool_queue.semaphore.release()
+                        else:
                             pool_queue.unused.append(database)
                     else:
                         database.close()
+                        pool_queue.semaphore.release()
                 pool_queue.time = time.time()
 
 
