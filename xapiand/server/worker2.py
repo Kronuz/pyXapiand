@@ -207,17 +207,13 @@ def base256ify_double(double):
     return mantissa, exp
 
 
-DBL_MAX = sys.float_info.max
-DBL_MAX_MANTISSA, DBL_MAX_EXP = base256ify_double(DBL_MAX)
-
-
 def serialise_double(double):
     # First byte:
     #   bit 7 Negative flag
     #   bit 4..6 Mantissa length - 1
     #   bit 0..3 --- 0-13 -> Exponent + 7
-    #             \- 14 -> Exponent given by next byte
-    #              - 15 -> Exponent given by next 2 bytes
+    #               \- 14 -> Exponent given by next byte
+    #                - 15 -> Exponent given by next 2 bytes
     #
     #  Then optional medium (1 byte) or large exponent (2 bytes, lsb first)
     #
@@ -289,21 +285,17 @@ def unserialise_double(buf):
     if len(buf) < mantissa_len:
         raise ValueError("Bad encoded double: short mantissa")
 
-    if exp > DBL_MAX_EXP:
-        double = float('inf')
-    else:
-        double = 0.0
-        mantissa = buf[:mantissa_len]
-        buf = buf[mantissa_len:]
-        for c in reversed(mantissa):
-            double *= 0.00390625  # 1 / 256
-            double += float(ord(c))
-            if exp == DBL_MAX_EXP and double > DBL_MAX_MANTISSA:
-                double = float('inf')
-                break
-        else:
-            if exp:
-                double = math.ldexp(double, exp * 8)
+    double = 0.0
+    mantissa = buf[:mantissa_len]
+    buf = buf[mantissa_len:]
+    for c in reversed(mantissa):
+        double *= 0.00390625  # 1 / 256
+        double += float(ord(c))
+    if exp:
+        try:
+            double = math.ldexp(double, exp * 8)
+        except OverflowError:
+            double = float('inf')
 
     if negative:
         double = -double
