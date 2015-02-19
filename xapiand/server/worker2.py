@@ -20,7 +20,7 @@ from gevent.threadpool import ThreadPool
 import xapian
 from ..core import DatabasesPool
 from ..utils import format_time
-from .exceptions import XapianError
+from ..exceptions import XapianError
 
 LOG_FORMAT = "[%(asctime)s: %(levelname)s/%(processName)s:%(threadName)s] %(message)s"
 
