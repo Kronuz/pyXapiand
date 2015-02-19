@@ -528,21 +528,21 @@ class ClientReceiver(object):
     @command
     def msg_termlist(self, message):
         with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
-            did = decode_length(message)[0]
+            did, message = decode_length(message)
             document = db.get_document(did)
             self.send_message(REPLY.REPLY_DOCLENGTH, encode_length(db.get_doclength(did)))
             prev = b''
             for t in db.get_termlist(document):
-                message = b''
-                message += encode_length(t.wdf)
-                message += encode_length(t.termfreq)
+                reply = b''
+                reply += encode_length(t.wdf)
+                reply += encode_length(t.termfreq)
                 current = t.term
                 common = os.path.commonprefix([prev, current])
                 common_len = len(common)
-                message += chr(common_len)
-                message += current[common_len:]
+                reply += chr(common_len)
+                reply += current[common_len:]
                 prev = current[:255]
-                self.send_message(REPLY.REPLY_TERMLIST, message)
+                self.send_message(REPLY.REPLY_TERMLIST, reply)
             self.send_message(REPLY.REPLY_DONE, b'')
 
     @command
@@ -550,12 +550,28 @@ class ClientReceiver(object):
         pass
 
     @command
-    def msg_postlist(self, message):
-        pass
+    def msg_postlist(self, term):
+        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+            termfreq = db.get_termfreq(term)
+            collfreq = db.get_collection_freq(term)
+            self.send_message(REPLY.REPLY_POSTLISTSTART, encode_length(termfreq) + encode_length(collfreq))
+
+            lastdocid = 0
+            for i in db.postlist(term):
+                newdocid = i.docid
+
+                reply = b''
+                reply += encode_length(newdocid - lastdocid - 1)
+                reply += encode_length(i.wdf)
+
+                self.send_message(REPLY.REPLY_POSTLISTITEM, reply)
+                lastdocid = newdocid
+
+            self.send_message(REPLY.REPLY_DONE, b'')
 
     @command
     def msg_reopen(self, message):
-        pass
+        self.send_message(REPLY.REPLY_DONE, b'')
 
     @command
     def msg_update(self, message):
@@ -564,53 +580,53 @@ class ClientReceiver(object):
         """
         XAPIAN_REMOTE_PROTOCOL_MAJOR_VERSION = 38
         XAPIAN_REMOTE_PROTOCOL_MINOR_VERSION = 0
-        message = b''
-        message += chr(XAPIAN_REMOTE_PROTOCOL_MAJOR_VERSION)
-        message += chr(XAPIAN_REMOTE_PROTOCOL_MINOR_VERSION)
+        reply = b''
+        reply += chr(XAPIAN_REMOTE_PROTOCOL_MAJOR_VERSION)
+        reply += chr(XAPIAN_REMOTE_PROTOCOL_MINOR_VERSION)
 
         if self.endpoints:
             with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
                 num_docs = db.get_doccount()
                 doclen_lb = db.get_doclength_lower_bound()
-                message += encode_length(num_docs)
-                message += encode_length(db.get_lastdocid() - num_docs)
-                message += encode_length(doclen_lb)
-                message += encode_length(db.get_doclength_upper_bound() - doclen_lb)
-                message += (b'1' if db.has_positions() else b'0')
+                reply += encode_length(num_docs)
+                reply += encode_length(db.get_lastdocid() - num_docs)
+                reply += encode_length(doclen_lb)
+                reply += encode_length(db.get_doclength_upper_bound() - doclen_lb)
+                reply += (b'1' if db.has_positions() else b'0')
                 total_len = int(db.get_avlength() * num_docs + 0.5)
-                message += encode_length(total_len)
+                reply += encode_length(total_len)
                 uuid = db.get_uuid()
-                message += uuid
+                reply += uuid
 
-        self.send_message(REPLY.REPLY_UPDATE, message)
+        self.send_message(REPLY.REPLY_UPDATE, reply)
 
     @command
     def msg_adddocument(self, message):
-        pass
+        pass  # TODO: Implement write!
 
     @command
     def msg_cancel(self, message):
-        pass
+        pass  # TODO: Implement write!
 
     @command
     def msg_deletedocumentterm(self, message):
-        pass
+        pass  # TODO: Implement write!
 
     @command
     def msg_commit(self, message):
-        pass
+        pass  # TODO: Implement write!
 
     @command
     def msg_replacedocument(self, message):
-        pass
+        pass  # TODO: Implement write!
 
     @command
     def msg_replacedocumentterm(self, message):
-        pass
+        pass  # TODO: Implement write!
 
     @command
     def msg_deletedocument(self, message):
-        pass
+        pass  # TODO: Implement write!
 
     @command
     def msg_writeaccess(self, message):
@@ -618,23 +634,24 @@ class ClientReceiver(object):
 
     @command
     def msg_getmetadata(self, message):
-        pass
+        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+            self.send_message(REPLY.REPLY_METADATA, db.get_metadata(message))
 
     @command
     def msg_setmetadata(self, message):
-        pass
+        pass  # TODO: Implement write!
 
     @command
     def msg_addspelling(self, message):
-        pass
+        pass  # TODO: Implement write!
 
     @command
     def msg_removespelling(self, message):
-        pass
+        pass  # TODO: Implement write!
 
     @command
     def msg_getmset(self, message):
-        pass
+        raise RuntimeError("Unexpected MSG_GETMSET!")
 
     @command
     def msg_shutdown(self, message):
@@ -646,22 +663,22 @@ class ClientReceiver(object):
             prefix = message
             prev = b''
             for t in db.metadata_keys(prefix):
-                message = b''
+                reply = b''
                 current = t.term
                 common = os.path.commonprefix([prev, current])
                 common_len = len(common)
-                message += chr(common_len)
-                message += current[common_len:]
+                reply += chr(common_len)
+                reply += current[common_len:]
                 prev = current[:255]
-                self.send_message(REPLY.REPLY_METADATAKEYLIST, message)
+                self.send_message(REPLY.REPLY_METADATAKEYLIST, reply)
             self.send_message(REPLY.REPLY_DONE, b'')
 
     @command
     def msg_freqs(self, term):
         with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
-            message = encode_length(db.get_termfreq(term))
-            message += encode_length(db.get_collection_freq(term))
-            self.send_message(REPLY.REPLY_FREQS, message)
+            reply = encode_length(db.get_termfreq(term))
+            reply += encode_length(db.get_collection_freq(term))
+            self.send_message(REPLY.REPLY_FREQS, reply)
 
     @command
     def msg_uniqueterms(self, message):
@@ -670,8 +687,8 @@ class ClientReceiver(object):
             self.send_message(REPLY.REPLY_UNIQUETERMS, encode_length(db.get_unique_terms(did)))
 
     @command
-    def msg_select(self, message):
-        self.endpoints = [message]
+    def msg_select(self, endpoint):
+        self.endpoints = [endpoint]
         self.msg_update(None)
 
 
