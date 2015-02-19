@@ -634,34 +634,60 @@ class ClientReceiver(object):
     @command
     def msg_adddocument(self, message):
         pass  # TODO: Implement write!
+        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+            did = wdb.add_document(xapian.Document.unserialise(message))
+            self.send_message(REPLY.REPLY_ADDDOCUMENT, encode_length(did))
 
     @command
     def msg_cancel(self, message):
         pass  # TODO: Implement write!
 
     @command
-    def msg_deletedocumentterm(self, message):
+    def msg_deletedocumentterm(self, term):
         pass  # TODO: Implement write!
+        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+            wdb.delete_document(term)
+            self.send_message(REPLY.REPLY_DONE, b'')
 
     @command
     def msg_commit(self, message):
         pass  # TODO: Implement write!
+        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+            wdb.commit()
+            self.send_message(REPLY.REPLY_DONE, b'')
 
     @command
     def msg_replacedocument(self, message):
         pass  # TODO: Implement write!
+        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+            did, message = decode_length(message)
+            document = xapian.Document.unserialise(message)
+            wdb.replace_document(did, document)
 
     @command
     def msg_replacedocumentterm(self, message):
         pass  # TODO: Implement write!
+        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+            length, message = decode_length(message)
+            term = message[:length]
+            message = message[length:]
+            document = xapian.Document.unserialise(message)
+            did = wdb.replace_document(term, document)
+            self.send_message(REPLY.REPLY_ADDDOCUMENT, encode_length(did))
 
     @command
     def msg_deletedocument(self, message):
         pass  # TODO: Implement write!
+        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+            did, message = decode_length(message)
+            wdb.delete_document(did)
+            self.send_message(REPLY.REPLY_DONE, b'')
 
     @command
     def msg_writeaccess(self, message):
-        pass
+        pass  # TODO: Implement write!
+        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+            self.msg_update(None, db=wdb)
 
     @command
     def msg_getmetadata(self, message):
@@ -671,14 +697,26 @@ class ClientReceiver(object):
     @command
     def msg_setmetadata(self, message):
         pass  # TODO: Implement write!
+        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+            keylen, message = decode_length(message)
+            key = message[:keylen]
+            message = message[keylen:]
+            val = message
+            wdb.set_metadata(key, val)
 
     @command
     def msg_addspelling(self, message):
         pass  # TODO: Implement write!
+        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+            freqinc, word = decode_length(message)
+            wdb.add_spelling(word, freqinc)
 
     @command
     def msg_removespelling(self, message):
         pass  # TODO: Implement write!
+        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+            freqinc, word = decode_length(message)
+            wdb.remove_spelling(word, freqinc)
 
     @command
     def msg_getmset(self, message):
