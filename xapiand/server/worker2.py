@@ -16,10 +16,11 @@ from gevent import queue
 from gevent import socket
 from gevent.server import StreamServer
 from gevent.threadpool import ThreadPool
+from gevent.lock import Semaphore
 
 import xapian
-from ..core import DatabasesPool
-from ..utils import format_time
+from ..core import DatabasesPool, DATABASE_MAX_LIFE
+from ..utils import parse_url, build_url, format_time
 from ..exceptions import XapianError
 
 LOG_FORMAT = "[%(asctime)s: %(levelname)s/%(processName)s:%(threadName)s] %(message)s"
@@ -130,6 +131,9 @@ def command(threaded=False, **kwargs):
 
 COMMIT_TIMEOUT = 1
 COMMANDS_POOL_SIZE = 100
+WRITERS_POOL_SIZE = 200
+COMMIT_SLOTS = 10
+QUEUE_WRITER_THREAD = 'Writer-%s'
 
 MESSAGE_TYPES = [
     'MSG_ALLTERMS',             # All Terms
@@ -344,11 +348,11 @@ def decode_length(buf):
 
 
 class ClientReceiver(object):
-    def __init__(self, server, client_socket, address):
+    def __init__(self, dispatcher, client_socket, address):
         self.weak_client = False
 
         self.closed = False
-        self.server = server
+        self.dispatcher = dispatcher
         self.client_socket = client_socket
         self.address = address
         self.cmd_id = 0
@@ -374,11 +378,11 @@ class ClientReceiver(object):
         return msg
 
     def connectionMade(self, client):
-        logger.info("New connection from %s: %s:%d (%d open connections)" % (client.client_id, self.address[0], self.address[1], len(self.server.clients)))
+        logger.info("New connection from %s: %s:%d (%d open connections)" % (client.client_id, self.address[0], self.address[1], len(self.dispatcher.clients)))
         self.reply_update()
 
     def connectionLost(self, client):
-        logger.info("Lost connection (%d open connections)" % len(self.server.clients))
+        logger.info("Lost connection (%d open connections)" % len(self.dispatcher.clients))
 
     def get_message(self, required_type=None):
         while True:
@@ -419,9 +423,9 @@ class ClientReceiver(object):
         command = AliveCommand(self, cmd=cmd, origin="%s:%d" % (self.address[0], self.address[1]))
 
         if func.threaded:
-            commands_pool = self.server.pool
-            pool_size = self.server.pool_size
-            pool_size_warning = self.server.pool_size_warning
+            commands_pool = self.dispatcher.pool
+            pool_size = self.dispatcher.pool_size
+            pool_size_warning = self.dispatcher.pool_size_warning
             commands_pool.spawn(func, command, self.client_socket, message, command)
             pool_used = len(commands_pool)
             if pool_used >= pool_size_warning:
@@ -443,9 +447,13 @@ class ClientReceiver(object):
     def reply_update(self):
         self.msg_update(None)
 
+    @property
+    def databases_pool(self):
+        return self.dispatcher.server.databases_pool
+
     @command
     def msg_allterms(self, message):
-        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+        with self.databases_pool.database(self.endpoints, writable=False, create=True) as db:
             prefix = message
             prev = b''
             for t in db.allterms(prefix):
@@ -462,12 +470,12 @@ class ClientReceiver(object):
 
     @command
     def msg_collfreq(self, term):
-        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+        with self.databases_pool.database(self.endpoints, writable=False, create=True) as db:
             self.send_message(REPLY.REPLY_COLLFREQ, encode_length(db.get_collection_freq(term)))
 
     @command
     def msg_document(self, message):
-        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+        with self.databases_pool.database(self.endpoints, writable=False, create=True) as db:
             did = decode_length(message)[0]
             document = db.get_document(did)
             self.send_message(REPLY.REPLY_DOCDATA, document.get_data())
@@ -480,17 +488,17 @@ class ClientReceiver(object):
 
     @command
     def msg_termexists(self, term):
-        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+        with self.databases_pool.database(self.endpoints, writable=False, create=True) as db:
             self.send_message((REPLY.REPLY_TERMEXISTS if db.term_exists(term) else REPLY.REPLY_TERMDOESNTEXIST), b'')
 
     @command
     def msg_termfreq(self, term):
-        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+        with self.databases_pool.database(self.endpoints, writable=False, create=True) as db:
             self.send_message(REPLY.REPLY_TERMFREQ, encode_length(db.get_termfreq(term)))
 
     @command
     def msg_valuestats(self, message):
-        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+        with self.databases_pool.database(self.endpoints, writable=False, create=True) as db:
             while message:
                 slot, message = decode_length(message)
                 reply = b''
@@ -509,7 +517,7 @@ class ClientReceiver(object):
 
     @command
     def msg_doclength(self, message):
-        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+        with self.databases_pool.database(self.endpoints, writable=False, create=True) as db:
             did, message = decode_length(message)
             self.send_message(REPLY.REPLY_DOCLENGTH, encode_length(db.get_doclength(did)))
 
@@ -542,7 +550,7 @@ class ClientReceiver(object):
 
     @command
     def msg_termlist(self, message):
-        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+        with self.databases_pool.database(self.endpoints, writable=False, create=True) as db:
             did, message = decode_length(message)
             document = db.get_document(did)
             self.send_message(REPLY.REPLY_DOCLENGTH, encode_length(db.get_doclength(did)))
@@ -562,7 +570,7 @@ class ClientReceiver(object):
 
     @command
     def msg_positionlist(self, message):
-        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+        with self.databases_pool.database(self.endpoints, writable=False, create=True) as db:
             did, term = decode_length(message)
 
             lastpos = -1
@@ -574,7 +582,7 @@ class ClientReceiver(object):
 
     @command
     def msg_postlist(self, term):
-        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+        with self.databases_pool.database(self.endpoints, writable=False, create=True) as db:
             termfreq = db.get_termfreq(term)
             collfreq = db.get_collection_freq(term)
             self.send_message(REPLY.REPLY_POSTLISTSTART, encode_length(termfreq) + encode_length(collfreq))
@@ -626,7 +634,7 @@ class ClientReceiver(object):
             if db:
                 reply += get_stats(db)
             else:
-                with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+                with self.databases_pool.database(self.endpoints, writable=False, create=True) as db:
                     reply += get_stats(db)
 
         self.send_message(REPLY.REPLY_UPDATE, reply)
@@ -634,7 +642,7 @@ class ClientReceiver(object):
     @command
     def msg_adddocument(self, message):
         pass  # TODO: Implement write!
-        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+        with self.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
             did = wdb.add_document(xapian.Document.unserialise(message))
             self.send_message(REPLY.REPLY_ADDDOCUMENT, encode_length(did))
 
@@ -645,21 +653,21 @@ class ClientReceiver(object):
     @command
     def msg_deletedocumentterm(self, term):
         pass  # TODO: Implement write!
-        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+        with self.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
             wdb.delete_document(term)
             self.send_message(REPLY.REPLY_DONE, b'')
 
     @command
     def msg_commit(self, message):
         pass  # TODO: Implement write!
-        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+        with self.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
             wdb.commit()
             self.send_message(REPLY.REPLY_DONE, b'')
 
     @command
     def msg_replacedocument(self, message):
         pass  # TODO: Implement write!
-        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+        with self.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
             did, message = decode_length(message)
             document = xapian.Document.unserialise(message)
             wdb.replace_document(did, document)
@@ -667,7 +675,7 @@ class ClientReceiver(object):
     @command
     def msg_replacedocumentterm(self, message):
         pass  # TODO: Implement write!
-        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+        with self.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
             length, message = decode_length(message)
             term = message[:length]
             message = message[length:]
@@ -678,7 +686,7 @@ class ClientReceiver(object):
     @command
     def msg_deletedocument(self, message):
         pass  # TODO: Implement write!
-        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+        with self.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
             did, message = decode_length(message)
             wdb.delete_document(did)
             self.send_message(REPLY.REPLY_DONE, b'')
@@ -686,18 +694,18 @@ class ClientReceiver(object):
     @command
     def msg_writeaccess(self, message):
         pass  # TODO: Implement write!
-        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+        with self.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
             self.msg_update(None, db=wdb)
 
     @command
     def msg_getmetadata(self, message):
-        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+        with self.databases_pool.database(self.endpoints, writable=False, create=True) as db:
             self.send_message(REPLY.REPLY_METADATA, db.get_metadata(message))
 
     @command
     def msg_setmetadata(self, message):
         pass  # TODO: Implement write!
-        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+        with self.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
             keylen, message = decode_length(message)
             key = message[:keylen]
             message = message[keylen:]
@@ -707,14 +715,14 @@ class ClientReceiver(object):
     @command
     def msg_addspelling(self, message):
         pass  # TODO: Implement write!
-        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+        with self.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
             freqinc, word = decode_length(message)
             wdb.add_spelling(word, freqinc)
 
     @command
     def msg_removespelling(self, message):
         pass  # TODO: Implement write!
-        with self.server.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
+        with self.databases_pool.database(self.endpoints, writable=True, create=True) as wdb:
             freqinc, word = decode_length(message)
             wdb.remove_spelling(word, freqinc)
 
@@ -728,7 +736,7 @@ class ClientReceiver(object):
 
     @command
     def msg_metadatakeylist(self, message):
-        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+        with self.databases_pool.database(self.endpoints, writable=False, create=True) as db:
             prefix = message
             prev = b''
             for t in db.metadata_keys(prefix):
@@ -744,14 +752,14 @@ class ClientReceiver(object):
 
     @command
     def msg_freqs(self, term):
-        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+        with self.databases_pool.database(self.endpoints, writable=False, create=True) as db:
             reply = encode_length(db.get_termfreq(term))
             reply += encode_length(db.get_collection_freq(term))
             self.send_message(REPLY.REPLY_FREQS, reply)
 
     @command
     def msg_uniqueterms(self, message):
-        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+        with self.databases_pool.database(self.endpoints, writable=False, create=True) as db:
             did, message = decode_length(message)
             self.send_message(REPLY.REPLY_UNIQUETERMS, encode_length(db.get_unique_terms(did)))
 
@@ -761,14 +769,13 @@ class ClientReceiver(object):
         self.msg_update(None)
 
 
-class CommandServer(StreamServer):
+class XapianDispatcher(StreamServer):
     pool_size = COMMANDS_POOL_SIZE
     receiver_class = ClientReceiver
 
-    def __init__(self, *args, **kwargs):
-        self.databases_pool = kwargs.pop('databases_pool')
-
-        super(CommandServer, self).__init__(*args, **kwargs)
+    def __init__(self, server, *args, **kwargs):
+        self.server = server
+        super(XapianDispatcher, self).__init__(*args, **kwargs)
 
         self.pool_size_warning = int(self.pool_size / 3.0 * 2.0)
         self.pool = ThreadPool(self.pool_size)
@@ -796,7 +803,7 @@ class CommandServer(StreamServer):
             if max_age is None:
                 max_age = 10
             logger.warning("Hitting Ctrl+C again will terminate all running tasks!")
-            super(CommandServer, self).close()
+            super(XapianDispatcher, self).close()
 
         now = time.time()
         clean = []
@@ -815,47 +822,240 @@ class CommandServer(StreamServer):
         return not bool(self.clients)
 
 
+def database_name(db):
+    return QUEUE_WRITER_THREAD % (hash(db) & 0xffffff)
+
+
+DATABASE_COMMANDS = {
+    'INDEX': (
+        'index',
+        lambda a: a[0][0],
+        dict(),
+    ),
+    'CINDEX': (
+        'index',
+        lambda a: a[0][0],
+        dict(commit=True),
+    ),
+    'DELETE': (
+        'delete',
+        lambda a: a[0],
+        dict(),
+    ),
+    'CDELETE': (
+        'delete',
+        lambda a: a[0],
+        dict(commit=True),
+    ),
+    'COMMIT': (
+        'commit',
+        lambda a: '',
+        dict(),
+    ),
+}
+
+Timeouts = collections.namedtuple('Timeouts', 'timeout commit delayed maximum')
+
+
+class XapianServer(object):
+    stopped = False
+
+    def __init__(self, listener, commit_timeout=None, commit_slots=None, data='.'):
+        self.databases = {}
+
+        self.pool_size = WRITERS_POOL_SIZE
+        self.pool_size_warning = int(self.pool_size / 3.0 * 2.0)
+        self.writers_pool = ThreadPool(self.pool_size)
+
+        if not commit_slots:
+            commit_slots = COMMIT_SLOTS
+        self.commit_lock = Semaphore(commit_slots)
+
+        self.listener = listener
+        self.data = data
+
+        self.databases_pool = DatabasesPool(data=self.data, log=logger)
+        self.xapian_dispatcher = XapianDispatcher(self, listener)
+
+        if commit_timeout is None:
+            commit_timeout = COMMIT_TIMEOUT
+
+        self.timeouts = Timeouts(
+            timeout=min(max(int(round(commit_timeout * 0.3)), 1), 3),
+            commit=commit_timeout * 1.0,
+            delayed=commit_timeout * 3.0,
+            maximum=commit_timeout * 9.0,
+        )
+
+    def _database_command(self, db, cmd, args):
+        start = time.time()
+        try:
+            attr, arg, kwargs = DATABASE_COMMANDS[cmd]
+            with self.databases_pool.database((db,), writable=True, create=True) as database:
+                docid = getattr(database, attr)(*args, **kwargs)
+        except Exception as exc:
+            logger.exception("%s", exc)
+            raise
+        docid = ' -> %s' % docid if docid else ''
+        duration = time.time() - start
+        logger.debug(
+            "Executed command %s(%s)%s ~%s",
+            cmd,
+            arg(args),
+            docid,
+            format_time(duration),
+        )
+
+    def _database_commit(self, db, to_commit, force=False):
+        if not to_commit:
+            return
+
+        now = time.time()
+
+        expires = now - self.timeouts.commit
+        expires_delayed = now - self.timeouts.delayed
+        expires_max = now - self.timeouts.maximum
+
+        for db, (dt0, dt1, dt2) in list(to_commit.items()):
+            do_commit = locked = force and self.commit_lock.acquire()  # If forcing, wait for the lock
+            if not do_commit:
+                do_commit = dt0 <= expires_max
+                if do_commit:
+                    logger.warning("Commit maximum expiration reached, commit forced! (%s)", db)
+            if not do_commit:
+                if dt1 <= expires_delayed or dt2 <= expires:
+                    do_commit = locked = self.commit_lock.acquire(False)
+                    if not locked:
+                        logger.warning("Out of commit slots, commit delayed! (%s)", db)
+            if do_commit:
+                try:
+                    self._database_command(db, 'COMMIT', ())
+                    del to_commit[db]
+                finally:
+                    if locked:
+                        self.commit_lock.release()
+
+    def _writer_loop(self, db, tq):
+        name = database_name(db)
+        to_commit = {}
+
+        current_thread = threading.current_thread()
+        tid = current_thread.name.rsplit('-', 1)[-1]
+        current_thread.name = '%s-%s' % (name[:14], tid)
+
+        start = last = time.time()
+
+        # Create a gevent Queue for this thread from the other tread's Queue
+        # (using the raw underlying deque, 'queue'):
+        queue = type(tq)(tq.maxsize)
+        queue.queue = tq.queue
+
+        database = None
+
+        # Open the database
+        try:
+            with self.databases_pool.database((db,), writable=True, create=True) as database:
+                logger.info("New writer %s: %s", name, db)
+                logger.debug("Database UUID: %s", database.get_uuid())
+            msg = None
+            timeout = self.timeouts.timeout
+            while not self.stopped:
+                self._database_commit(db, to_commit)
+
+                now = time.time()
+                try:
+                    msg = queue.get(True, timeout)
+                except queue.Empty:
+                    if now - last > DATABASE_MAX_LIFE:
+                        logger.debug("Writer timeout... stopping!")
+                        break
+                    continue
+                if not msg:
+                    continue
+                try:
+                    cmd, endpoints, args = msg
+                except ValueError:
+                    logger.error("Wrong command received!")
+                    continue
+
+                for _db in endpoints:
+                    _db = build_url(*parse_url(_db.strip()))
+                    if _db != db:
+                        continue
+
+                    last = now
+                    self._database_command(db, cmd, args)
+
+                    if cmd in ('INDEX', 'DELETE'):
+                        now = time.time()
+                        if db in to_commit:
+                            to_commit[db] = (to_commit[db][0], to_commit[db][1], now)
+                        else:
+                            to_commit[db] = (now, now, now)
+        except Exception as e:
+            logger.error("Writer ERROR: %s", e)
+        finally:
+            self.databases.pop(db, None)
+            logger.info("Writer %s ended! ~ lived for %s", name, format_time(time.time() - start))
+
+    def start(self):
+        gevent.signal(signal.SIGTERM, self.xapian_dispatcher.close)
+        gevent.signal(signal.SIGINT, self.xapian_dispatcher.close)
+
+        logger.debug("Starting server at %s..." % self.listener)
+        try:
+            self.xapian_dispatcher.start()
+        except Exception as exc:
+            logger.error("Cannot start server: %s", exc)
+            sys.exit(-1)
+
+        logger.info("Waiting for commands...")
+        msg = None
+        main_queue = queue.Queue()
+        while not self.xapian_dispatcher.closed:
+            try:
+                msg = main_queue.get(True, self.timeouts.timeout)
+            except queue.Empty:
+                continue
+            if not msg:
+                continue
+
+        logger.debug("Waiting for connected clients to disconnect...")
+        while True:
+            if self.xapian_dispatcher.close(max_age=10):
+                break
+            if gevent.wait(timeout=3):
+                break
+
+        self.stopped = time.time()
+
+    def start_writer(self, db):
+        db = build_url(*parse_url(db.strip()))
+        name = database_name(db)
+        try:
+            tq = None
+            t, tq = self.databases[db]
+            if t.ready():
+                raise KeyError
+        except KeyError:
+            tq = tq or queue.Queue()
+            pool_used = len(self.writers_pool)
+            if not (self.pool_size_warning - pool_used) % 10:
+                logger.warning("Writers pool is close to be full (%s/%s)", pool_used, self.pool_size)
+            elif pool_used == self.pool_size:
+                logger.error("Writers poll is full! (%s/%s)", pool_used, self.pool_size)
+            t = self.writers_pool.spawn(self._writer_loop, db, tq)
+            self.databases[db] = (t, tq)
+        return db, name, t, tq
+
+    def get_writer(self, db):
+        db, name, t, tq = self.start_writer()
+        return tq
+
+
 def xapiand_run(data=None, logfile=None, pidfile=None, uid=None, gid=None, umask=0,
         working_directory=None, verbosity=1, commit_slots=None, commit_timeout=None,
         listener=None, queue_type=None, **options):
 
-    Timeouts = collections.namedtuple('Timeouts', 'timeout commit delayed maximum')
-    if commit_timeout is None:
-        commit_timeout = COMMIT_TIMEOUT
-    timeouts = Timeouts(
-        timeout=min(max(int(round(commit_timeout * 0.3)), 1), 3),
-        commit=commit_timeout * 1.0,
-        delayed=commit_timeout * 3.0,
-        maximum=commit_timeout * 9.0,
-    )
-
-    databases_pool = DatabasesPool(data=data, log=logger)
-    xapian_server = CommandServer(listener, databases_pool=databases_pool)
-
-    gevent.signal(signal.SIGTERM, xapian_server.close)
-    gevent.signal(signal.SIGINT, xapian_server.close)
-
-    logger.debug("Starting server at %s..." % listener)
-    try:
-        xapian_server.start()
-    except Exception as exc:
-        logger.error("Cannot start server: %s", exc)
-        sys.exit(-1)
-
-    logger.info("Waiting for commands...")
-    msg = None
-    main_queue = queue.Queue()
-    while not xapian_server.closed:
-        try:
-            msg = main_queue.get(True, timeouts.timeout)
-        except queue.Empty:
-            continue
-        if not msg:
-            continue
-
-    logger.debug("Waiting for connected clients to disconnect...")
-    while True:
-        if xapian_server.close(max_age=10):
-            break
-        if gevent.wait(timeout=3):
-            break
+    server = XapianServer(listener, commit_timeout=commit_timeout, commit_slots=commit_slots, data=data)
+    server.start()
