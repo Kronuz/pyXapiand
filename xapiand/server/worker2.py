@@ -482,8 +482,9 @@ class ClientReceiver(object):
         pass
 
     @command
-    def msg_termfreq(self, message):
-        pass
+    def msg_termfreq(self, term):
+        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+            self.send_message(REPLY.REPLY_TERMFREQ, encode_length(db.get_termfreq(term)))
 
     @command
     def msg_valuestats(self, message):
@@ -641,15 +642,32 @@ class ClientReceiver(object):
 
     @command
     def msg_metadatakeylist(self, message):
-        pass
+        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+            prefix = message
+            prev = b''
+            for t in db.metadata_keys(prefix):
+                message = b''
+                current = t.term
+                common = os.path.commonprefix([prev, current])
+                common_len = len(common)
+                message += chr(common_len)
+                message += current[common_len:]
+                prev = current[:255]
+                self.send_message(REPLY.REPLY_METADATAKEYLIST, message)
+            self.send_message(REPLY.REPLY_DONE, b'')
 
     @command
-    def msg_freqs(self, message):
-        pass
+    def msg_freqs(self, term):
+        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+            message = encode_length(db.get_termfreq(term))
+            message += encode_length(db.get_collection_freq(term))
+            self.send_message(REPLY.REPLY_FREQS, message)
 
     @command
     def msg_uniqueterms(self, message):
-        pass
+        with self.server.databases_pool.database(self.endpoints, writable=False, create=True) as db:
+            did, message = decode_length(message)
+            self.send_message(REPLY.REPLY_UNIQUETERMS, encode_length(db.get_unique_terms(did)))
 
     @command
     def msg_select(self, message):
