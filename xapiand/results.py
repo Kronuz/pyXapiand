@@ -3,8 +3,7 @@ class XapianResult(object):
 
 
 class XapianResults(object):
-    def __init__(self, connection, results):
-        self.connection = connection
+    def __init__(self, results):
         self.results = results
 
         self.size = 0
@@ -23,9 +22,6 @@ class XapianResults(object):
                 self.estimated = result['estimated']
         self.facets = facets
 
-    def __del__(self):
-        self.connection.checkin()
-
     def __len__(self):
         return self.size
 
@@ -36,11 +32,7 @@ class XapianResults(object):
         if self._first_result is not None:
             _first_result, self._first_result = self._first_result, None
             return self.get_data(_first_result)
-        try:
-            return self.get_data(self.results.next())
-        except StopIteration:
-            self.connection.checkin()
-            raise
+        return self.get_data(self.results.next())
     __next__ = next
 
     def get_data(self, result):

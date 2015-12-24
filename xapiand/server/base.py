@@ -69,7 +69,7 @@ class AliveCommand(object):
             AliveCommand.cmds_count = 0
 
     def cancelled(self):
-        self.executed(None, message="Command %d cancelled", logger=self.log.warning)
+        self.executed(message="Command %d cancelled", logger=self.log.warning)
 
     def error(self, e):
         self.executed(e, message="Command %d ERROR", logger=self.log.error)
@@ -90,8 +90,9 @@ def command(threaded=False, **kwargs):
 
                 # Create a gevent socket for this thread from the other tread's socket
                 # (using the raw underlying socket, '_sock'):
-                self.client_socket = socket.socket(_sock=client_socket._sock)
+                client_socket = socket.socket(_sock=client_socket._sock)
 
+                self.client_socket = client_socket
                 try:
                     command.executed(func(self, *args, **kwargs))
                 except (IOError, RuntimeError, socket.error) as e:

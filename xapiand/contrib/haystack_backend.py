@@ -167,7 +167,10 @@ class XapianSearchBackend(BaseSearchBackend):
                     if field_name == self.content_field_name:
                         pass
 
-        document_data = pickle.dumps((obj._meta.app_label, obj._meta.module_name, obj.pk, data), protocol=pickle.HIGHEST_PROTOCOL).encode('base64')
+        model = obj._meta.model
+        if model._deferred:
+            model = model._meta.proxy_for_model
+        document_data = pickle.dumps((model._meta.app_label, model._meta.module_name, obj.pk, data), protocol=pickle.HIGHEST_PROTOCOL).encode('base64')
 
         term_prefix = get_prefix(DJANGO_CT.upper(), DOCUMENT_CUSTOM_TERM_PREFIX)
         document_terms.append(dict(term=get_model_ct(obj), weight=0, prefix=term_prefix))
@@ -247,17 +250,18 @@ class XapianSearchBackend(BaseSearchBackend):
         hints = hints or {}
         endpoints = self.endpoints.for_read(models=models, **hints)
 
-        connection = self.xapian.checkout()
-        connection.using(endpoints)
-        results = connection.search(
-            query_string,
-            offset=offset,
-            limit=limit,
-            results_class=XapianSearchResults,
-            ranges=ranges,
-            terms=terms,
-            partials=partials,
-        )
+        def callback(xapian):
+            xapian.using(endpoints)
+            return xapian.search(
+                query_string,
+                offset=offset,
+                limit=limit,
+                results_class=XapianSearchResults,
+                ranges=ranges,
+                terms=terms,
+                partials=partials,
+            )
+        results = self.xapian(callback)
 
         for facet in results.facets:
             facets['fields'][facet['name']] = (facet['term'], facet['termfreq'])

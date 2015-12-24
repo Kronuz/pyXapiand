@@ -48,12 +48,16 @@ class ConnectionPool(object):
     def factory(self):
         return self.server().factory()
 
-    def checkout(self):
-        ts, connection = self._checkout_connection()
-        connection._checkout = (self, ts)
-        return connection
+    @contextlib.contextmanager
+    def reserve(self, *args, **kwargs):
+        """Context-manager to obtain a Client object from the pool."""
+        ts, connection = self._checkout_connection(*args, **kwargs)
+        try:
+            yield connection
+        finally:
+            self._checkin_connection(ts, connection)
 
-    def _checkout_connection(self):
+    def _checkout_connection(self, *args, **kwargs):
         # If there's no maxsize, no need to block waiting for a connection.
         blocking = self.maxsize is not None
         # Loop until we get a non-stale connection, or we create a new one.
@@ -96,7 +100,7 @@ class ConnectionPool(object):
         # If the connection is now stale, don't return it to the pool.
         # Push an empty slot instead so that it will be refreshed when needed.
         now = time.time()
-        if connection.client_socket and (self.max_age is None or now - ts < self.max_age):
+        if self.max_age is None or now - ts < self.max_age:
             self.clients.put((ts, connection))
         else:
             if self.maxsize is not None:
@@ -148,17 +152,8 @@ class Connection(object):
     def __del__(self):
         try:
             self.disconnect()
-            self.checkin()
         except Exception:
             pass
-
-    def checkin(self):
-        if self._checkout:
-            pool, ts = self._checkout
-            self._checkout = None
-            self._client_responses_socket = None
-            self.cmd_id += 1
-            pool._checkin_connection(ts, self)
 
     def _error_message(self, exception):
         # args for socket.error can either be (errno, "message")
@@ -245,7 +240,7 @@ class Connection(object):
             exc_info = sys.exc_info()
             e = exc_info[1]
             if len(e.args) == 1:
-                _errno, errmsg = "UNKNOWN", e.args[0]
+                _errno, errmsg = 'UNKNOWN', e.args[0]
             else:
                 _errno, errmsg = e.args
             raise ConnectionError("Error %s while writing to socket. %s." % (_errno, errmsg)), None, exc_info[2]
@@ -260,8 +255,8 @@ class Connection(object):
             if not response:
                 self.disconnect()
                 raise ConnectionError("No response!")
-            # print('--->>>>', id(self), '%s:%s' % (self.address[0], self.address[1]), repr(response), file=sys.stderr)
             response = response[:-2]
+            # print('--->>>>', id(self), '%s:%s' % (self.address[0], self.address[1]), repr(response), file=sys.stderr)
             if response:
                 if response[0] in (b"#", b" "):
                     continue
@@ -322,12 +317,13 @@ class ServerPool(object):
     connection_class = Connection
 
     def __init__(self, servers, max_pool_size=35, blacklist_time=60,
-                 wait_for_connection=None, max_age=60,
+                 wait_for_connection=None, max_age=60, max_retries=3,
                  max_connect_retries=2, reconnect_delay=0.1,
                  socket_timeout=4, socket_class=socket.socket, sleep=time.sleep,
                  encoding='utf-8', encoding_errors='strict'):
         self.socket_class = socket_class
         self.sleep = sleep
+        self.max_retries = max_retries
         self.max_connect_retries = max_connect_retries
         self.reconnect_delay = reconnect_delay
         self.socket_timeout = socket_timeout
@@ -403,21 +399,17 @@ class ServerPool(object):
         else:
             raise socket.timeout("No server left in the pool")
 
-    def checkout(self):
-        return self._pool.checkout()
-
-    @contextlib.contextmanager
-    def connection(self):
-        """Context-manager to obtain a Client object from the pool."""
-        connection = self.checkout()
-        try:
-            yield connection
-        finally:
-            connection.checkin()
-
     def __call__(self, callback, *args, **kwargs):
-        with self.connection as connection:
-            return callback(connection, *args, **kwargs)
+        """Context-manager to obtain a Client object from the pool."""
+        retries = 0
+        while retries <= self.max_retries:
+            with self._pool.reserve() as connection:
+                try:
+                    return callback(connection)
+                except (IOError, RuntimeError, socket.error, ConnectionError):
+                    exc_info = sys.exc_info()
+                    retries += 1
+        raise exc_info[0], exc_info[1], exc_info[2]
 
     def call(self, name, *args, **kwargs):
         def callback(connection):
