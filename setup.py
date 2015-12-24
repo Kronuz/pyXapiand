@@ -22,10 +22,11 @@ setup(
     packages=[
         'xapiand',
         'xapiand.bin',
-        'xapiand.server',
         'xapiand.client',
         'xapiand.management',
         'xapiand.management.commands',
+        'xapiand.server',
+        'xapiand.server.queue',
     ],
     url='http://github.com/Kronuz/Xapiand',
     license='MIT / GPL2',
