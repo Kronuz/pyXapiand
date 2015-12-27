@@ -16,7 +16,7 @@
 name="xapiand"
 rcvar=${name}_enable
 
-command="/usr/local/www/dubalu/python-packages/xapiand/bin/worker.py"
+command="/usr/local/bin/xapiand"
 command_interpreter="python"
 
 load_rc_config $name
